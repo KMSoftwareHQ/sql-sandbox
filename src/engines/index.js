@@ -13,6 +13,19 @@ const ENGINE_LOADERS = {
     const { createPostgresSession } = await import('./postgres.js');
     return createPostgresSession;
   },
+  mysql: async () => {
+    if (!window.crossOriginIsolated) {
+      throw new Error('MySQL needs cross-origin isolation (COOP/COEP headers), which this server does not send.');
+    }
+    // Served unmodified from public/vendor (see scripts/copy-vendor-engines.mjs), resolved against
+    // the page URL so it works under any subpath.
+    const workerModuleUrl = new URL('./vendor/lite4mariadb/worker.mjs', document.baseURI).href;
+    const [{ createMysqlSession }, { Lite4MariaDBWorker }] = await Promise.all([
+      import('./mysql.js'),
+      import(/* @vite-ignore */ workerModuleUrl),
+    ]);
+    return () => createMysqlSession({ createDatabase: () => Lite4MariaDBWorker.create() });
+  },
 };
 
 const loadedSessionFactories = new Map();
