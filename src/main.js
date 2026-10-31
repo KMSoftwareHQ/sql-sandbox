@@ -5,7 +5,16 @@ import { EXAMPLE_SESSION } from './example.js';
 import { formatElapsedTime, renderLoading, renderNotice, renderResults } from './results-view.js';
 import { createSchemaBrowser } from './schema-browser.js';
 import { buildSessionFilename, normalizeEngineName, parseSession, serializeSession } from './session-file.js';
-import { createDebouncedFunction, loadSavedSession, saveSession } from './storage.js';
+import {
+  createDebouncedFunction,
+  loadSavedSession,
+  markRunFinished,
+  markRunStarted,
+  saveSession,
+  setDatabaseBuilt,
+  wasDatabaseBuilt,
+  wasLastRunInterrupted,
+} from './storage.js';
 import { createTabManager } from './tabs.js';
 import { applyTheme, oppositeTheme, persistTheme, resolveInitialTheme } from './theme.js';
 
@@ -27,7 +36,8 @@ const EMPTY_DATABASE_MESSAGE = 'The database is empty. Run your scripts (Run all
 let currentTheme = resolveInitialTheme();
 applyTheme(currentTheme);
 
-const initialSession = loadSavedSession() ?? EXAMPLE_SESSION;
+const savedSession = loadSavedSession();
+const initialSession = savedSession ?? EXAMPLE_SESSION;
 engineSelect.value = normalizeEngineName(initialSession.engine);
 
 const autosave = createDebouncedFunction(saveCurrentSession, 400);
@@ -63,7 +73,7 @@ function buildSelectStatement(databaseName, tableName) {
 
 // --- Database session -------------------------------------------------------------------------
 // One live database per page. It persists between runs until Reset database, an engine change,
-// or loading a session file. It is never saved: reloading the page starts with an empty database.
+// or loading a session file. It is never saved; a reload rebuilds it by running every tab again.
 
 let databaseSessionPromise = null;
 let isBusy = false;
@@ -129,13 +139,20 @@ async function executeScripts(scripts) {
 
   const runs = [];
   let totalElapsedMs = 0;
-  for (const script of scripts) {
-    const outcome = await databaseSession.execute(script.sql);
-    totalElapsedMs += outcome.elapsedMs;
-    // A lone script needs no heading unless it failed ("Error in query.sql").
-    const showTitle = scripts.length > 1 || outcome.error !== null;
-    runs.push({ title: showTitle ? script.title : '', ...outcome });
-    if (outcome.error) break;
+  // Marked only around the SQL itself, so a reload during an engine download is not mistaken for a stuck query.
+  markRunStarted();
+  setDatabaseBuilt(true);
+  try {
+    for (const script of scripts) {
+      const outcome = await databaseSession.execute(script.sql);
+      totalElapsedMs += outcome.elapsedMs;
+      // A lone script needs no heading unless it failed ("Error in query.sql").
+      const showTitle = scripts.length > 1 || outcome.error !== null;
+      runs.push({ title: showTitle ? script.title : '', ...outcome });
+      if (outcome.error) break;
+    }
+  } finally {
+    markRunFinished();
   }
   renderResults(resultsContainer, runs);
   elapsedTimeLabel.textContent = `Executed in ${formatElapsedTime(totalElapsedMs)}`;
@@ -162,6 +179,7 @@ function runAllTabs() {
 // Call only inside runExclusively.
 async function resetDatabase(noticeMessage) {
   await closeDatabaseSession();
+  setDatabaseBuilt(false);
   schemaBrowser.reset();
   schemaBrowser.showMessage(EMPTY_DATABASE_MESSAGE);
   elapsedTimeLabel.textContent = '';
@@ -273,3 +291,14 @@ themeButton.addEventListener('click', () => {
 window.addEventListener('pagehide', saveCurrentSession);
 
 updateThemeButtonLabel();
+
+// The database lives in memory, so a reload starts empty. If the user had built one, rebuild it by
+// running every tab again, unless the last run never finished: a query may freeze the page, so
+// the user decides when to run again.
+if (savedSession && wasDatabaseBuilt()) {
+  if (wasLastRunInterrupted()) {
+    renderNotice(resultsContainer, 'The database was not rebuilt automatically because the last run did not finish (the page was reloaded, closed or froze). If a query never ends, fix it, then press Run all.');
+  } else {
+    runExclusively(() => executeScripts(allTabScripts()));
+  }
+}

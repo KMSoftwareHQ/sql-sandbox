@@ -1,11 +1,20 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { loadSavedSession, saveSession } from '../src/storage.js';
+import {
+  loadSavedSession,
+  markRunFinished,
+  markRunStarted,
+  saveSession,
+  setDatabaseBuilt,
+  wasDatabaseBuilt,
+  wasLastRunInterrupted,
+} from '../src/storage.js';
 
 function installMemoryLocalStorage() {
   const storedValues = new Map();
   globalThis.localStorage = {
     getItem: (key) => (storedValues.has(key) ? storedValues.get(key) : null),
     setItem: (key, value) => storedValues.set(key, String(value)),
+    removeItem: (key) => storedValues.delete(key),
   };
 }
 
@@ -37,5 +46,25 @@ describe('session storage', () => {
     expect(loadSavedSession().activeTabIndex).toBe(0);
     localStorage.setItem('sql-sandbox:session', '{not json');
     expect(loadSavedSession()).toBeNull();
+  });
+});
+
+describe('reload rebuild flags', () => {
+  beforeEach(installMemoryLocalStorage);
+
+  it('tracks whether the user has built a database', () => {
+    expect(wasDatabaseBuilt()).toBe(false);
+    setDatabaseBuilt(true);
+    expect(wasDatabaseBuilt()).toBe(true);
+    setDatabaseBuilt(false);
+    expect(wasDatabaseBuilt()).toBe(false);
+  });
+
+  it('reports an interrupted run only between start and finish', () => {
+    expect(wasLastRunInterrupted()).toBe(false);
+    markRunStarted();
+    expect(wasLastRunInterrupted()).toBe(true);
+    markRunFinished();
+    expect(wasLastRunInterrupted()).toBe(false);
   });
 });
