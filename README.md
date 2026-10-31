@@ -9,24 +9,40 @@ Everything runs in your browser as WebAssembly: no backend, no accounts, no tele
 
 ## Features
 
-- Two engines: SQLite (`sql.js`) and PostgreSQL (`@electric-sql/pglite`), loaded lazily on first use.
-- Schema editor and query editor side by side (stacked on narrow screens), CodeMirror 6 with SQL highlighting.
-- Every run starts from a fresh database: schema first, then the query.
-- One result table per row-returning statement, "N rows affected" / "OK" for the rest, execution time, distinct `NULL`.
-- Clear errors that say whether they came from the schema or the query.
-- Autosave to `localStorage`; dark and light themes (follows the system by default).
-- Download your session as a runnable `.sql` file and load it later.
-- Run with the Run button or Ctrl/Cmd+Enter.
+- Engines: SQLite (`sql.js`), PostgreSQL (`@electric-sql/pglite`) and MySQL (real MariaDB via
+  [`lite4mariadb`](https://github.com/shyim/lite4mariadb)), each loaded lazily on first use.
+  MySQL tutorial scripts with `CREATE DATABASE`, `USE`, backticks and `ENGINE=InnoDB` work as-is.
+- Workbench-style: multiple SQL tabs running against one live database. Run the selection or the
+  whole tab (Ctrl/Cmd+Enter), run every tab in order, or reset the database.
+- Schema sidebar listing databases, tables and columns (with primary keys); double-click a table
+  to insert a `SELECT`.
+- Result tables per statement, "N rows affected" / "OK" for the rest, execution time, distinct `NULL`.
+- Autosave of your tabs to `localStorage`; dark and light themes (follows the system by default).
+- Download every tab as one runnable `.sql` file and open it later to rebuild the database.
 
 ## How it works
 
 - The SQL engines are compiled to WebAssembly and run inside the browser tab. Your queries never
   reach a server; the server only hosts static files.
-- Each run creates a fresh in-memory database, executes the schema, then the query, and renders
-  each result set. Results are inserted as text, never as HTML.
-- Engines are lazy-loaded the first time you pick them, so the initial page stays small.
+- The database lives in memory for the session and keeps its state between runs. It is not saved:
+  after a reload, press Run all (or open your `.sql` file) to rebuild it. Results are inserted as
+  text, never as HTML.
+- Engines are lazy-loaded the first time you pick them, so the initial page stays small. The
+  MySQL engine is served unmodified from `public/vendor/` (copied from `node_modules` by
+  `scripts/copy-vendor-engines.mjs` before dev and build) and runs in a Web Worker.
 - Your session autosaves to `localStorage`. Downloading it produces a plain, runnable `.sql` file
   with marker comments, which the app reads back on load.
+
+## MySQL engine notes
+
+- It is MariaDB 13.1, so almost all MySQL syntax works. A session starts in an empty `sandbox`
+  database; scripts can `CREATE DATABASE` and `USE` their own.
+- Not supported yet by the in-browser build: stored procedures, functions and events.
+  Views, triggers, transactions, CTEs, window functions and JSON functions work.
+- Columns with duplicate names in one result (e.g. `a.id, b.id`) need distinct aliases.
+- The engine is about 17 MB (5.5 MB compressed), downloaded only when you pick MySQL. It needs
+  cross-origin isolation (`Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy`
+  headers), which the bundled nginx config sends.
 
 ## Quick start
 
@@ -59,14 +75,15 @@ A downloaded session is valid, runnable SQL. Metadata lives in marker comments:
 
 ```sql
 -- @fiddle engine=sqlite
--- @fiddle section=schema
+-- @fiddle file=schema.sql
 CREATE TABLE ...;
--- @fiddle section=query
+-- @fiddle file=queries.sql
 SELECT ...;
 ```
 
-Markers are case-insensitive. A plain `.sql` file without markers is loaded entirely into the
-schema editor. An unknown engine falls back to `sqlite`. The format stays backward compatible.
+Each `file=` marker starts a tab. Markers are case-insensitive and an unknown engine falls back
+to `sqlite`. A plain `.sql` file without markers (for example a tutorial script) opens as a new
+tab. Files saved by v0.1–v0.3 (`section=schema` / `section=query`) still open, as two tabs.
 
 ## Branches and releases
 
@@ -78,4 +95,4 @@ schema editor. An unknown engine falls back to `sqlite`. The format stays backwa
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+GPL-2.0-only, see [LICENSE](LICENSE). (The MySQL option bundles MariaDB, which is GPL-2.0.)

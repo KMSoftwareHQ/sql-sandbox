@@ -1,51 +1,58 @@
 import { normalizeEngineName } from '../session-file.js';
 
-const loadedEngines = new Map();
+// Engine modules are imported on demand so the initial bundle stays small.
+const ENGINE_LOADERS = {
+  sqlite: async () => {
+    const [{ createSqliteSession }, wasmUrlModule] = await Promise.all([
+      import('./sqlite.js'),
+      import('sql.js/dist/sql-wasm.wasm?url'),
+    ]);
+    return () => createSqliteSession({ wasmLocation: wasmUrlModule.default });
+  },
+  postgres: async () => {
+    const { createPostgresSession } = await import('./postgres.js');
+    return createPostgresSession;
+  },
+  mysql: async () => {
+    if (!window.crossOriginIsolated) {
+      throw new Error('MySQL needs cross-origin isolation (COOP/COEP headers), which this server does not send.');
+    }
+    // Served unmodified from public/vendor (see scripts/copy-vendor-engines.mjs), resolved against
+    // the page URL so it works under any subpath.
+    const workerModuleUrl = new URL('./vendor/lite4mariadb/worker.mjs', document.baseURI).href;
+    const [{ createMysqlSession }, { Lite4MariaDBWorker }] = await Promise.all([
+      import('./mysql.js'),
+      import(/* @vite-ignore */ workerModuleUrl),
+    ]);
+    return () => createMysqlSession({ createDatabase: () => Lite4MariaDBWorker.create() });
+  },
+};
 
-// Engines are imported on demand so the initial bundle stays small.
-function loadEngine(engineName) {
-  if (!loadedEngines.has(engineName)) {
-    const enginePromise =
-      engineName === 'postgres'
-        ? import('./postgres.js').then((module) => ({ run: module.runPostgres }))
-        : Promise.all([import('./sqlite.js'), import('sql.js/dist/sql-wasm.wasm?url')]).then(
-            ([module, wasmUrlModule]) => ({
-              run: (schemaSql, querySql) =>
-                module.runSqlite(schemaSql, querySql, { wasmLocation: wasmUrlModule.default }),
-            }),
-          );
-    loadedEngines.set(engineName, enginePromise);
-    enginePromise.catch(() => loadedEngines.delete(engineName));
+const loadedSessionFactories = new Map();
+
+function loadSessionFactory(engineName) {
+  if (!loadedSessionFactories.has(engineName)) {
+    const factoryPromise = ENGINE_LOADERS[engineName]();
+    loadedSessionFactories.set(engineName, factoryPromise);
+    factoryPromise.catch(() => loadedSessionFactories.delete(engineName));
   }
-  return loadedEngines.get(engineName);
+  return loadedSessionFactories.get(engineName);
 }
 
 export function isEngineLoaded(engineName) {
-  return loadedEngines.has(normalizeEngineName(engineName));
+  return loadedSessionFactories.has(normalizeEngineName(engineName));
 }
 
-// Returns { resultSets, error, elapsedMs }.
-// resultSets items: { kind: 'rows', columns, rows } or { kind: 'status', message }.
-// error: null or { phase: 'schema' | 'query' | 'engine', message }.
-export async function runFiddle(engineName, schemaSql, querySql) {
-  const startTime = performance.now();
-  let engine;
-  try {
-    engine = await loadEngine(normalizeEngineName(engineName));
-  } catch (loadError) {
-    return {
-      resultSets: [],
-      error: { phase: 'engine', message: `Could not load the database engine: ${loadError.message}` },
-      elapsedMs: performance.now() - startTime,
-    };
-  }
-  try {
-    return await engine.run(schemaSql, querySql);
-  } catch (unexpectedError) {
-    return {
-      resultSets: [],
-      error: { phase: 'engine', message: unexpectedError.message },
-      elapsedMs: performance.now() - startTime,
-    };
-  }
+// Creates a persistent database session for the engine.
+// Session API:
+//   execute(sqlText) -> { resultSets, error, elapsedMs }
+//     resultSets items: { kind: 'rows', columns, rows } | { kind: 'status', message }
+//     error: null | { message }
+//   listSchema() -> [{ name, tables: [{ name, columns: [{ name, type, isPrimaryKey }] }] }]
+//   close()
+export async function createEngineSession(engineName) {
+  const normalizedName = normalizeEngineName(engineName);
+  const loader = ENGINE_LOADERS[normalizedName] ? normalizedName : 'sqlite';
+  const createSession = await loadSessionFactory(loader);
+  return createSession();
 }

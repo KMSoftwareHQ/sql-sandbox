@@ -9,7 +9,9 @@ inspired by db-fiddle.com. Everything runs in the browser:
 - Session state persists in `localStorage`.
 - Users download their session as a `.sql` file and load it later to pick up where they left off.
 - Dark and light themes.
-- Engines run as WebAssembly: SQLite (`sql.js`) and PostgreSQL (`@electric-sql/pglite`).
+- Engines run as WebAssembly: SQLite (`sql.js`), PostgreSQL (`@electric-sql/pglite`) and
+  MySQL via MariaDB (`lite4mariadb`, pinned; served unmodified from `public/vendor/`, needs
+  COOP/COEP headers).
 
 Audience is people learning SQL: keep the UI simple, errors readable, and code approachable.
 
@@ -20,6 +22,10 @@ Audience is people learning SQL: keep the UI simple, errors readable, and code a
 - Production sits behind the host's master Caddy reverse proxy, mounted at
   `kmsoftware.net/sql-sandbox/`. Proxy config lives in a separate infrastructure repo.
 - Uses Docker's default `bridge` network (the host has no free subnets for new networks).
+
+## License
+
+GPL-2.0-only (required because the MySQL option bundles MariaDB, which is GPL-2.0).
 
 ## Stack
 
@@ -33,14 +39,21 @@ A downloaded session is valid, runnable SQL. Metadata lives in marker comments:
 
 ```sql
 -- @fiddle engine=sqlite
--- @fiddle section=schema
+-- @fiddle file=schema.sql
 CREATE TABLE ...;
--- @fiddle section=query
+-- @fiddle file=queries.sql
 SELECT ...;
 ```
 
-A plain `.sql` file without markers is loaded entirely into the schema editor.
-Changes to this format must stay backward compatible.
+Each `file=` marker starts a tab. A plain `.sql` file without markers opens as a new tab.
+v0.1–v0.3 files (`section=schema` / `section=query`) must keep loading. Changes to this format
+must stay backward compatible.
+
+## Run model
+
+Workbench-style: one live in-memory database per page, shared by all tabs, kept until
+Reset database, an engine switch, or opening a session file (which replays every tab).
+The database itself is never persisted; only the tabs are.
 
 ## Versioning and branches
 

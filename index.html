@@ -14,27 +14,30 @@
         <select id="engine-select" aria-label="Database engine">
           <option value="sqlite">SQLite</option>
           <option value="postgres">PostgreSQL</option>
+          <option value="mysql">MySQL (MariaDB)</option>
         </select>
       </label>
-      <button id="run-button" class="button button-primary" type="button" title="Run (Ctrl/Cmd+Enter)">Run</button>
+      <button id="run-button" class="button button-primary" type="button" title="Run the selection, or the whole tab (Ctrl/Cmd+Enter)">Run</button>
+      <button id="run-all-button" class="button" type="button" title="Run every tab in order">Run all</button>
+      <button id="reset-database-button" class="button" type="button" title="Drop everything and start with an empty database">Reset database</button>
       <span class="toolbar-spacer"></span>
-      <button id="download-button" class="button" type="button">Download .sql</button>
-      <button id="load-button" class="button" type="button">Load .sql</button>
-      <input id="load-input" type="file" accept=".sql,text/plain,application/sql" hidden />
-      <button id="reset-button" class="button" type="button">Reset</button>
+      <span id="autosave-warning" class="autosave-warning" role="status" hidden>Autosave failed (browser storage is full). Download your session to keep it.</span>
+      <button id="download-button" class="button" type="button" title="Save every tab to one .sql file">Download .sql</button>
+      <button id="open-button" class="button" type="button" title="Open a saved session, or .sql scripts as new tabs">Open .sql</button>
+      <input id="open-input" type="file" accept=".sql,text/plain,application/sql" multiple hidden />
+      <button id="new-session-button" class="button" type="button">New session</button>
       <button id="theme-button" class="button" type="button" aria-label="Toggle dark and light theme">Theme</button>
     </header>
 
     <main class="workspace">
-      <section class="editors">
-        <div class="editor-pane">
-          <h2 class="pane-title">Schema SQL</h2>
-          <div id="schema-editor" class="editor-host"></div>
-        </div>
-        <div class="editor-pane">
-          <h2 class="pane-title">Query SQL</h2>
-          <div id="query-editor" class="editor-host"></div>
-        </div>
+      <aside class="schema-panel" aria-label="Database schema">
+        <h2 class="pane-title">Schema</h2>
+        <div id="schema-browser" class="schema-browser"></div>
+      </aside>
+
+      <section class="editor-pane">
+        <div id="tab-bar" class="tab-bar" role="tablist" aria-label="SQL scripts"></div>
+        <div id="editor" class="editor-host"></div>
       </section>
 
       <section class="results-panel" aria-live="polite">
