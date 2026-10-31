@@ -26,6 +26,15 @@ npm run preview  # serve the production build
 
 ## Deploying
 
+With Docker:
+
+```sh
+docker compose up -d --build   # serves on 127.0.0.1:8110 (set SQL_SANDBOX_PORT to change)
+```
+
+Put a reverse proxy in front to expose it publicly; it can be mounted under any subpath.
+Without Docker:
+
 `npm run build` outputs a static site in `dist/` with relative asset paths, so it can be served
 from any subpath (for example `https://example.com/sql-sandbox/`). Any static file host works;
 make sure `.wasm` files are served as `application/wasm`.
