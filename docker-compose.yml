@@ -1,0 +1,13 @@
+name: sql-sandbox
+
+services:
+  sql-sandbox:
+    build: .
+    image: sql-sandbox
+    container_name: sql-sandbox
+    restart: unless-stopped
+    # Publish on loopback only; a reverse proxy in front exposes it publicly.
+    # Override the host port with SQL_SANDBOX_PORT.
+    ports:
+      - "127.0.0.1:${SQL_SANDBOX_PORT:-8110}:80"
+    network_mode: bridge
