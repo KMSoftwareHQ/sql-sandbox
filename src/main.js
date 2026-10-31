@@ -38,7 +38,8 @@ const EMPTY_DATABASE_MESSAGE = 'The database is empty. Run your scripts (Run all
 // After this many restores in a row that never finished, the next load skips restoring so the page stays usable.
 const MAX_UNFINISHED_RESTORES = 2;
 // Identifies this page among browser tabs that share the saved session and database.
-const PAGE_ID = crypto.randomUUID();
+// crypto.randomUUID needs a secure context (HTTPS or localhost); self-hosting over plain HTTP must still work.
+const PAGE_ID = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 // Tells other tabs when this one saves or deletes the database. Local to the browser, no network.
 const tabChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('sql-sandbox') : null;
 
@@ -90,11 +91,19 @@ let isBusy = false;
 // The last successful save by this page: { changeMarker, savedAt }. A run that leaves the marker
 // unchanged is not saved again, as long as the stored snapshot is still this save.
 let lastSave = null;
+// A saved snapshot that is kept but not yet restored (the restore failed or was skipped). The next
+// run retries the restore instead of starting an empty database that would replace it on save.
+// Cleared by a successful restore or by resetDatabase (Reset, engine switch, New session, open file).
+let unrestoredSnapshot = null;
 
 function getDatabaseSession() {
   if (!databaseSessionPromise) {
-    databaseSessionPromise = createEngineSession(engineSelect.value);
-    databaseSessionPromise.catch(() => { databaseSessionPromise = null; });
+    const snapshotToRestore = unrestoredSnapshot;
+    databaseSessionPromise = createEngineSession(engineSelect.value, { snapshot: snapshotToRestore ?? undefined });
+    databaseSessionPromise.then(
+      () => { if (unrestoredSnapshot === snapshotToRestore) unrestoredSnapshot = null; },
+      () => { databaseSessionPromise = null; },
+    );
   }
   return databaseSessionPromise;
 }
@@ -146,7 +155,10 @@ async function executeScripts(scripts) {
   try {
     databaseSession = await getDatabaseSession();
   } catch (engineError) {
-    renderResults(resultsContainer, [{ title: '', resultSets: [], error: { message: `Could not load the database engine: ${engineError.message}` } }]);
+    const message = unrestoredSnapshot
+      ? `Your saved database still could not be restored (${engineError.message}). Nothing was run. Reload to try again, or press Reset database to discard it and start empty.`
+      : `Could not load the database engine: ${engineError.message}`;
+    renderResults(resultsContainer, [{ title: '', resultSets: [], error: { message } }]);
     return;
   }
 
@@ -202,8 +214,8 @@ async function saveDatabase(databaseSession) {
 }
 
 // Restores the snapshot saved after the last run. Call only inside runExclusively.
-// A snapshot is never deleted here: a failure may be a network problem, so the user decides
-// (reload to retry, or Reset database to discard it).
+// A snapshot is never deleted here because of a failure: it may be a network problem, so the user
+// decides (reload or run to retry, or Reset database to discard it).
 async function restoreSavedDatabase() {
   const savedDatabase = await loadDatabaseSnapshot();
   if (!savedDatabase) return;
@@ -216,7 +228,8 @@ async function restoreSavedDatabase() {
   // A restore that crashes the page (e.g. out of memory) would otherwise repeat on every load.
   if (startRestoreAttempt() >= MAX_UNFINISHED_RESTORES) {
     finishRestoreAttempt();
-    renderNotice(resultsContainer, 'Your saved database was not restored this time, because restoring it did not finish the last two times (the page was closed, or it ran out of memory). Reload to try again, or press Reset database to discard it.');
+    unrestoredSnapshot = savedDatabase.snapshot;
+    renderNotice(resultsContainer, 'Your saved database was not restored automatically, because restoring it did not finish the last two times (the page was closed, or it ran out of memory). Running SQL tries again; press Reset database to discard it instead.');
     return;
   }
   renderLoading(resultsContainer, 'Restoring your database…');
@@ -229,7 +242,8 @@ async function restoreSavedDatabase() {
     // lastSave stays null: the snapshot belongs to an earlier page, so the next run saves it as this page's.
   } catch (restoreError) {
     await closeDatabaseSession();
-    renderNotice(resultsContainer, `Your saved database could not be restored (${restoreError.message}). It is kept: reload to try again, or press Reset database to discard it. Running SQL now starts a new, empty database that replaces it.`);
+    unrestoredSnapshot = savedDatabase.snapshot;
+    renderNotice(resultsContainer, `Your saved database could not be restored (${restoreError.message}). It is kept: reload or run SQL to try again, or press Reset database to discard it.`);
   } finally {
     finishRestoreAttempt();
   }
@@ -257,6 +271,7 @@ async function resetDatabase(noticeMessage) {
   await closeDatabaseSession();
   await clearDatabaseSnapshot();
   lastSave = null;
+  unrestoredSnapshot = null;
   tabChannel?.postMessage('database-cleared');
   databaseSaveWarning.hidden = true;
   schemaBrowser.reset();

@@ -69,21 +69,22 @@ export async function createEngineSession(engineName, { snapshot } = {}) {
   const normalizedName = normalizeEngineName(engineName);
   const loader = ENGINE_LOADERS[normalizedName] ? normalizedName : 'sqlite';
   const createSession = await loadSessionFactory(loader);
-  return startWithTimeout(createSession(snapshot));
+  // Only restores can hang (see startWithTimeout); a fresh start fails on its own.
+  return snapshot ? startWithTimeout(createSession(snapshot)) : createSession(snapshot);
 }
 
-// Generous enough for a slow first download of the largest engine. PGlite never settles when its
-// wasm download fails while loading a data directory, which would lock the controls forever.
-const ENGINE_START_TIMEOUT_MS = 90_000;
+// PGlite never settles when its wasm download fails while loading a data directory, which would lock
+// the controls forever. Generous enough for a slow first download of the largest engine (~17 MB).
+const RESTORE_TIMEOUT_MS = 180_000;
 
 function startWithTimeout(sessionPromise) {
   let timerId;
   const timeout = new Promise((resolve, reject) => {
     timerId = setTimeout(() => {
-      reject(new Error('The database engine did not start in time. Check your connection and reload the page.'));
+      reject(new Error('restoring did not finish in time; the engine may still be downloading'));
       // If it does start later, nobody is using it.
       sessionPromise.then((lateSession) => lateSession.close()).catch(() => {});
-    }, ENGINE_START_TIMEOUT_MS);
+    }, RESTORE_TIMEOUT_MS);
   });
   return Promise.race([sessionPromise, timeout]).finally(() => clearTimeout(timerId));
 }

@@ -58,9 +58,11 @@ IndexedDB (`src/database-snapshot-store.js`), and a reload restores it without r
 - Runs that change nothing (per the engine's `getChangeMarker()`) are not saved again.
 - An open write transaction is never saved (`OpenTransactionError`); the user is told to finish it.
 - Reset, an engine switch and New session delete the snapshot.
-- A snapshot is never deleted automatically: if restoring fails (possibly a network problem) or
-  did not finish twice in a row (possibly out of memory), the user is told to reload or press
-  Reset database. Engine start-up times out after 90 s so the controls cannot stay locked.
+- A failed or skipped restore never deletes the snapshot (it may be a network problem): runs retry
+  the restore and nothing is saved until it succeeds or the user presses Reset database. Restores
+  time out after 180 s so the controls cannot stay locked. Snapshots are only deleted by the user
+  (Reset, engine switch, New session, opening a file), or when they belong to another engine or
+  there are no saved tabs.
 
 ## Versioning and branches
 
