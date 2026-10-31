@@ -53,7 +53,9 @@ must stay backward compatible.
 
 Workbench-style: one live in-memory database per page, shared by all tabs, kept until
 Reset database, an engine switch, or opening a session file (which replays every tab).
-The database itself is never persisted; only the tabs are.
+The database itself is never persisted; only the tabs are. If the user had built a database, a
+reload rebuilds it by running every tab again (including tabs never run). If the previous run never
+finished (a query may freeze the page), the rebuild is skipped and the user is told to press Run all.
 
 ## Versioning and branches
 

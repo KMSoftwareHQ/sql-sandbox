@@ -2,6 +2,13 @@ import { normalizeEngineName, sanitizeTabName } from './session-file.js';
 
 const SESSION_KEY = 'sql-sandbox:session';
 const THEME_KEY = 'sql-sandbox:theme';
+// Set once the user has built a database, cleared when it is reset. A reload rebuilds only if set.
+const DATABASE_BUILT_KEY = 'sql-sandbox:database-built';
+// Set while SQL runs, cleared when any run finishes. Still set on load means the last run never
+// finished (the page froze, or was reloaded or closed mid-run), so the automatic rebuild is skipped.
+// Kept in localStorage so it survives closing a frozen tab. Shared by all browser tabs: the worst
+// case is a needless "not rebuilt" notice while another tab is mid-run.
+const RUN_IN_PROGRESS_KEY = 'sql-sandbox:run-in-progress';
 
 // Saved shape: { engine, tabs: [{ name, sql }], activeTabIndex }.
 // v0.2–v0.3 saved { engine, schemaSql, querySql }; that shape is converted to two tabs.
@@ -44,6 +51,47 @@ export function saveSession({ engine, tabs, activeTabIndex }) {
     return true;
   } catch {
     return false;
+  }
+}
+
+export function wasDatabaseBuilt() {
+  try {
+    return localStorage.getItem(DATABASE_BUILT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setDatabaseBuilt(isBuilt) {
+  try {
+    if (isBuilt) localStorage.setItem(DATABASE_BUILT_KEY, '1');
+    else localStorage.removeItem(DATABASE_BUILT_KEY);
+  } catch {
+    // Storage unavailable: the database just will not be rebuilt on reload.
+  }
+}
+
+export function wasLastRunInterrupted() {
+  try {
+    return localStorage.getItem(RUN_IN_PROGRESS_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+export function markRunStarted() {
+  try {
+    localStorage.setItem(RUN_IN_PROGRESS_KEY, '1');
+  } catch {
+    // Storage unavailable: no freeze guard, the run still happens.
+  }
+}
+
+export function markRunFinished() {
+  try {
+    localStorage.removeItem(RUN_IN_PROGRESS_KEY);
+  } catch {
+    // Nothing to clear.
   }
 }
 
