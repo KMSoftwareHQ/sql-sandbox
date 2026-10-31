@@ -1,7 +1,7 @@
 import { normalizeEngineName } from './session-file.js';
 
-const SESSION_KEY = 'db-fiddle:session';
-const THEME_KEY = 'db-fiddle:theme';
+const SESSION_KEY = 'sql-sandbox:session';
+const THEME_KEY = 'sql-sandbox:theme';
 
 export function loadSavedSession() {
   try {
