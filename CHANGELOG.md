@@ -6,6 +6,20 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-31
+
+### Changed
+
+- Renamed to SQL Sandbox. Browser storage keys are now `sql-sandbox:*`, so autosaved sessions
+  from 0.1.0 are not restored; downloaded `.sql` files still load.
+- Downloads are named `sql-sandbox-YYYY-MM-DD.sql`.
+- Build uses relative asset paths so it can be hosted under a subpath.
+
+### Fixed
+
+- Download link URL is revoked after the download starts (some browsers aborted it).
+- Ctrl/Cmd+Enter inside an editor no longer triggers a second run attempt.
+
 ## [0.1.0] - 2026-10-31
 
 ### Added
