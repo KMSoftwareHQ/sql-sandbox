@@ -37,11 +37,13 @@ export function loadSavedSession() {
   }
 }
 
+// Returns false when the browser refused to store it (storage full or disabled).
 export function saveSession({ engine, tabs, activeTabIndex }) {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify({ engine, tabs, activeTabIndex }));
+    return true;
   } catch {
-    // Storage may be full or disabled; the sandbox still works without autosave.
+    return false;
   }
 }
 
