@@ -3,6 +3,10 @@
 An open-source, account-free SQL playground for learning SQL, inspired by db-fiddle.com.
 Everything runs in your browser as WebAssembly: no backend, no accounts, no telemetry.
 
+**Live demo: [kmsoftware.net/sql-sandbox](https://kmsoftware.net/sql-sandbox/)**
+
+![SQL Sandbox in dark theme: schema and query editors with a results table](docs/screenshot.png)
+
 ## Features
 
 - Two engines: SQLite (`sql.js`) and PostgreSQL (`@electric-sql/pglite`), loaded lazily on first use.
@@ -13,6 +17,16 @@ Everything runs in your browser as WebAssembly: no backend, no accounts, no tele
 - Autosave to `localStorage`; dark and light themes (follows the system by default).
 - Download your session as a runnable `.sql` file and load it later.
 - Run with the Run button or Ctrl/Cmd+Enter.
+
+## How it works
+
+- The SQL engines are compiled to WebAssembly and run inside the browser tab. Your queries never
+  reach a server; the server only hosts static files.
+- Each run creates a fresh in-memory database, executes the schema, then the query, and renders
+  each result set. Results are inserted as text, never as HTML.
+- Engines are lazy-loaded the first time you pick them, so the initial page stays small.
+- Your session autosaves to `localStorage`. Downloading it produces a plain, runnable `.sql` file
+  with marker comments, which the app reads back on load.
 
 ## Quick start
 
