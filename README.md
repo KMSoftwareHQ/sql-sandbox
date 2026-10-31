@@ -78,4 +78,4 @@ schema editor. An unknown engine falls back to `sqlite`. The format stays backwa
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+GPL-2.0-only, see [LICENSE](LICENSE). (The MySQL option bundles MariaDB, which is GPL-2.0.)

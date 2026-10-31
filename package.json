@@ -2,7 +2,7 @@
   "name": "sql-sandbox",
   "version": "0.3.1",
   "private": true,
-  "license": "MIT",
+  "license": "GPL-2.0-only",
   "type": "module",
   "description": "In-browser SQL playground for learning SQL (SQLite and PostgreSQL via WebAssembly)",
   "scripts": {

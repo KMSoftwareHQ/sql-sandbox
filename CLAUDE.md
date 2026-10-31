@@ -21,6 +21,10 @@ Audience is people learning SQL: keep the UI simple, errors readable, and code a
   `kmsoftware.net/sql-sandbox/`. Proxy config lives in a separate infrastructure repo.
 - Uses Docker's default `bridge` network (the host has no free subnets for new networks).
 
+## License
+
+GPL-2.0-only (required because the MySQL option bundles MariaDB, which is GPL-2.0).
+
 ## Stack
 
 - Vite + vanilla JavaScript (ES modules), no framework.
