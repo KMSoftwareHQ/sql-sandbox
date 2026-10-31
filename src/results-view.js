@@ -56,6 +56,7 @@ function renderRowsTable(resultSet) {
   const rowCountText = `${rowCount} ${rowCount === 1 ? 'row' : 'rows'}`;
   const captionText = rowCount > MAX_RENDERED_ROWS ? `${rowCountText} (showing the first ${MAX_RENDERED_ROWS})` : rowCountText;
   wrapper.append(createElementWithText('p', 'result-caption', captionText));
+  if (resultSet.warning) wrapper.append(createElementWithText('p', 'result-warning', resultSet.warning));
   return wrapper;
 }
 

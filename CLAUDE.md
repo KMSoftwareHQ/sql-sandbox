@@ -9,7 +9,9 @@ inspired by db-fiddle.com. Everything runs in the browser:
 - Session state persists in `localStorage`.
 - Users download their session as a `.sql` file and load it later to pick up where they left off.
 - Dark and light themes.
-- Engines run as WebAssembly: SQLite (`sql.js`) and PostgreSQL (`@electric-sql/pglite`).
+- Engines run as WebAssembly: SQLite (`sql.js`), PostgreSQL (`@electric-sql/pglite`) and
+  MySQL via MariaDB (`lite4mariadb`, pinned; served unmodified from `public/vendor/`, needs
+  COOP/COEP headers).
 
 Audience is people learning SQL: keep the UI simple, errors readable, and code approachable.
 

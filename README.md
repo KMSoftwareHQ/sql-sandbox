@@ -9,7 +9,9 @@ Everything runs in your browser as WebAssembly: no backend, no accounts, no tele
 
 ## Features
 
-- Engines: SQLite (`sql.js`) and PostgreSQL (`@electric-sql/pglite`), loaded lazily on first use.
+- Engines: SQLite (`sql.js`), PostgreSQL (`@electric-sql/pglite`) and MySQL (real MariaDB via
+  [`lite4mariadb`](https://github.com/shyim/lite4mariadb)), each loaded lazily on first use.
+  MySQL tutorial scripts with `CREATE DATABASE`, `USE`, backticks and `ENGINE=InnoDB` work as-is.
 - Workbench-style: multiple SQL tabs running against one live database. Run the selection or the
   whole tab (Ctrl/Cmd+Enter), run every tab in order, or reset the database.
 - Schema sidebar listing databases, tables and columns (with primary keys); double-click a table
@@ -25,9 +27,22 @@ Everything runs in your browser as WebAssembly: no backend, no accounts, no tele
 - The database lives in memory for the session and keeps its state between runs. It is not saved:
   after a reload, press Run all (or open your `.sql` file) to rebuild it. Results are inserted as
   text, never as HTML.
-- Engines are lazy-loaded the first time you pick them, so the initial page stays small.
+- Engines are lazy-loaded the first time you pick them, so the initial page stays small. The
+  MySQL engine is served unmodified from `public/vendor/` (copied from `node_modules` by
+  `scripts/copy-vendor-engines.mjs` before dev and build) and runs in a Web Worker.
 - Your session autosaves to `localStorage`. Downloading it produces a plain, runnable `.sql` file
   with marker comments, which the app reads back on load.
+
+## MySQL engine notes
+
+- It is MariaDB 13.1, so almost all MySQL syntax works. A session starts in an empty `sandbox`
+  database; scripts can `CREATE DATABASE` and `USE` their own.
+- Not supported yet by the in-browser build: stored procedures, functions and events.
+  Views, triggers, transactions, CTEs, window functions and JSON functions work.
+- Columns with duplicate names in one result (e.g. `a.id, b.id`) need distinct aliases.
+- The engine is about 17 MB (5.5 MB compressed), downloaded only when you pick MySQL. It needs
+  cross-origin isolation (`Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy`
+  headers), which the bundled nginx config sends.
 
 ## Quick start
 

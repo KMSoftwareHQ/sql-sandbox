@@ -147,6 +147,8 @@ select {
 .tab-close:hover,
 .tab-add:hover { color: var(--color-accent); }
 
+.result-warning { margin: 4px 0; color: var(--color-error-text); }
+
 .run-title { margin: 12px 0 6px; font-size: 13px; color: var(--color-text-muted); }
 .run-title:first-child { margin-top: 0; }
 
