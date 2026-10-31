@@ -13,6 +13,14 @@ inspired by db-fiddle.com. Everything runs in the browser:
 
 Audience is people learning SQL: keep the UI simple, errors readable, and code approachable.
 
+## Deployment
+
+- Runs in Docker (`docker compose up -d --build`): nginx serves the static build on
+  `127.0.0.1:8110` (override with `SQL_SANDBOX_PORT`).
+- Production sits behind the host's master Caddy reverse proxy, mounted at
+  `kmsoftware.net/sql-sandbox/`. Proxy config lives in a separate infrastructure repo.
+- Uses Docker's default `bridge` network (the host has no free subnets for new networks).
+
 ## Stack
 
 - Vite + vanilla JavaScript (ES modules), no framework.
@@ -67,8 +75,9 @@ This is a public repository.
    credential files, internal URLs, hostnames and IPs, email addresses, personal file paths
    (`/home/<user>/...`), and customer or company data. If anything looks sensitive, stop and ask.
 4. **Git and PRs.** One PR = one change; unrelated fixes, refactors and docs go in separate PRs.
-   Check `git branch` and `git status` before every commit, amend or reset. Don't push or open a
-   PR until the prompter approves.
+   Check `git branch` and `git status` before every commit, amend or reset.
+   **This repo is low-sensitivity:** commit, merge, release and push without waiting for approval.
+   (Stricter repos require approval before pushing or opening a PR.)
 5. **You write the code by default.** Don't delegate code writing to subagents. Use subagents
    only for:
    - parallel independent fixes (one agent and one worktree each)
@@ -81,8 +90,8 @@ This is a public repository.
 6. **Review every change, including your own:** scope matches what was agreed; failure paths
    (error, timeout, retry, partial run); input validation and auth; grep for other callers;
    re-run the tests yourself and check that the assertions prove the claim.
-7. **Before opening a PR,** explain in plain words: the problem, what the change does, its size
-   (fix vs tests vs extras), what was and wasn't tested, and any merge order. Wait for approval.
+7. **When reporting a change or opening a PR,** explain in plain words: the problem, what the
+   change does, its size (fix vs tests vs extras), what was and wasn't tested, and any merge order.
    Remove worktrees after the merge.
 
 ### High-risk areas (independent review every time)
