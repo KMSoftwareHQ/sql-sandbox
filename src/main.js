@@ -85,6 +85,7 @@ engineSelect.addEventListener('change', () => {
 
 runButton.addEventListener('click', runCurrentFiddle);
 document.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented) return; // the editor keymap already handled it
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
     event.preventDefault();
     runCurrentFiddle();
@@ -100,7 +101,7 @@ downloadButton.addEventListener('click', () => {
   document.body.append(downloadLink);
   downloadLink.click();
   downloadLink.remove();
-  URL.revokeObjectURL(downloadUrl);
+  setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
 });
 
 loadButton.addEventListener('click', () => loadInput.click());
