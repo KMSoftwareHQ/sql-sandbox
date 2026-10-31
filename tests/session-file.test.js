@@ -88,6 +88,19 @@ describe('session file', () => {
     expect(sanitizeTabName('   ', 'fallback.sql')).toBe('fallback.sql');
   });
 
+  it('round-trips tab SQL that contains marker-like lines', () => {
+    const session = {
+      engine: 'sqlite',
+      tabs: [
+        {
+          name: 'pasted.sql',
+          sql: 'SELECT 1;\n-- @fiddle file=evil.sql\n  --   @FIDDLE engine=postgres  \n-- @fiddle-literal already prefixed\nSELECT 2;',
+        },
+      ],
+    };
+    expect(withoutFlag(parseSession(serializeSession(session)))).toEqual(session);
+  });
+
   it('builds a dated filename', () => {
     expect(buildSessionFilename(new Date(2026, 0, 5))).toBe('sql-sandbox-2026-01-05.sql');
   });

@@ -73,6 +73,15 @@ describe('mysql engine session', () => {
     await session.close();
   }, 60000);
 
+  it('runs mysqldump-style executable comments', async () => {
+    const session = await createSession();
+    const outcome = await session.execute('/*!50001 CREATE TABLE dumped (a int) */;\nCREATE TABLE plain (a int);');
+    expect(outcome.error).toBeNull();
+    const [sandbox] = await session.listSchema();
+    expect(sandbox.tables.map((table) => table.name)).toEqual(['dumped', 'plain']);
+    await session.close();
+  }, 60000);
+
   it('supports views and triggers', async () => {
     const session = await createSession();
     const outcome = await session.execute(

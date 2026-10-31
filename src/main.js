@@ -20,6 +20,7 @@ const newSessionButton = document.getElementById('new-session-button');
 const themeButton = document.getElementById('theme-button');
 const resultsContainer = document.getElementById('results');
 const elapsedTimeLabel = document.getElementById('elapsed-time');
+const autosaveWarning = document.getElementById('autosave-warning');
 
 const EMPTY_DATABASE_MESSAGE = 'The database is empty. Run your scripts (Run all) to build it.';
 
@@ -48,7 +49,8 @@ const schemaBrowser = createSchemaBrowser({
 schemaBrowser.showMessage(EMPTY_DATABASE_MESSAGE);
 
 function saveCurrentSession() {
-  saveSession({ engine: engineSelect.value, ...tabManager.getSnapshot() });
+  const saved = saveSession({ engine: engineSelect.value, ...tabManager.getSnapshot() });
+  autosaveWarning.hidden = saved;
 }
 
 function buildSelectStatement(databaseName, tableName) {
@@ -100,52 +102,64 @@ function setControlsBusy(busy) {
   engineSelect.disabled = busy;
 }
 
-// Runs scripts one after another against the live database, stopping at the first error.
-// scripts: [{ title, sql }].
-async function runScripts(scripts) {
+// Every operation that touches the database goes through here, so only one runs at a time and
+// multi-step operations (reset then replay) cannot be interleaved with a click or shortcut.
+async function runExclusively(operation) {
   if (isBusy) return;
   setControlsBusy(true);
-  elapsedTimeLabel.textContent = '';
-  renderLoading(resultsContainer, isEngineLoaded(engineSelect.value) ? 'Running…' : 'Loading engine…');
   try {
-    let databaseSession;
-    try {
-      databaseSession = await getDatabaseSession();
-    } catch (engineError) {
-      renderResults(resultsContainer, [{ title: '', resultSets: [], error: { message: `Could not load the database engine: ${engineError.message}` } }]);
-      return;
-    }
-
-    const runs = [];
-    let totalElapsedMs = 0;
-    for (const script of scripts) {
-      const outcome = await databaseSession.execute(script.sql);
-      totalElapsedMs += outcome.elapsedMs;
-      // A lone script needs no heading unless it failed ("Error in query.sql").
-      const showTitle = scripts.length > 1 || outcome.error !== null;
-      runs.push({ title: showTitle ? script.title : '', ...outcome });
-      if (outcome.error) break;
-    }
-    renderResults(resultsContainer, runs);
-    elapsedTimeLabel.textContent = `Executed in ${formatElapsedTime(totalElapsedMs)}`;
-    await refreshSchemaBrowser(databaseSession);
+    await operation();
   } finally {
     setControlsBusy(false);
   }
 }
 
+// Runs scripts one after another against the live database, stopping at the first error.
+// scripts: [{ title, sql }]. Call only inside runExclusively.
+async function executeScripts(scripts) {
+  elapsedTimeLabel.textContent = '';
+  renderLoading(resultsContainer, isEngineLoaded(engineSelect.value) ? 'Running…' : 'Loading engine…');
+  let databaseSession;
+  try {
+    databaseSession = await getDatabaseSession();
+  } catch (engineError) {
+    renderResults(resultsContainer, [{ title: '', resultSets: [], error: { message: `Could not load the database engine: ${engineError.message}` } }]);
+    return;
+  }
+
+  const runs = [];
+  let totalElapsedMs = 0;
+  for (const script of scripts) {
+    const outcome = await databaseSession.execute(script.sql);
+    totalElapsedMs += outcome.elapsedMs;
+    // A lone script needs no heading unless it failed ("Error in query.sql").
+    const showTitle = scripts.length > 1 || outcome.error !== null;
+    runs.push({ title: showTitle ? script.title : '', ...outcome });
+    if (outcome.error) break;
+  }
+  renderResults(resultsContainer, runs);
+  elapsedTimeLabel.textContent = `Executed in ${formatElapsedTime(totalElapsedMs)}`;
+  await refreshSchemaBrowser(databaseSession);
+}
+
+function allTabScripts() {
+  return tabManager.getSnapshot().tabs.map((tab) => ({ title: tab.name, sql: tab.sql }));
+}
+
 function runSelectionOrActiveTab() {
   const selectedText = editor.getSelectedText();
   const activeTabName = tabManager.getActiveTabName();
-  if (selectedText.trim()) return runScripts([{ title: `${activeTabName} (selection)`, sql: selectedText }]);
-  return runScripts([{ title: activeTabName, sql: editor.getText() }]);
+  const script = selectedText.trim()
+    ? { title: `${activeTabName} (selection)`, sql: selectedText }
+    : { title: activeTabName, sql: editor.getText() };
+  return runExclusively(() => executeScripts([script]));
 }
 
 function runAllTabs() {
-  const { tabs } = tabManager.getSnapshot();
-  return runScripts(tabs.map((tab) => ({ title: tab.name, sql: tab.sql })));
+  return runExclusively(() => executeScripts(allTabScripts()));
 }
 
+// Call only inside runExclusively.
 async function resetDatabase(noticeMessage) {
   await closeDatabaseSession();
   schemaBrowser.reset();
@@ -156,6 +170,7 @@ async function resetDatabase(noticeMessage) {
 
 // --- Sessions and files ------------------------------------------------------------------------
 
+// Replaces the tabs, resets the database and optionally replays every tab. Call only inside runExclusively.
 async function loadSession({ engine, tabs, activeTabIndex = 0 }, { replay }) {
   const engineName = normalizeEngineName(engine);
   engineSelect.value = engineName;
@@ -163,9 +178,10 @@ async function loadSession({ engine, tabs, activeTabIndex = 0 }, { replay }) {
   tabManager.replaceTabs(tabs, activeTabIndex);
   saveCurrentSession();
   await resetDatabase('Database reset.');
-  if (replay) await runAllTabs();
+  if (replay) await executeScripts(allTabScripts());
 }
 
+// Call only inside runExclusively.
 async function openFiles(files) {
   const parsedFiles = await Promise.all(
     [...files].map(async (file) => ({ fileName: file.name, ...parseSession(await file.text(), file.name) })),
@@ -207,11 +223,11 @@ function updateThemeButtonLabel() {
 
 // --- Event wiring ------------------------------------------------------------------------------
 
-engineSelect.addEventListener('change', async () => {
+engineSelect.addEventListener('change', () => {
   editor.setEngine(engineSelect.value);
   saveCurrentSession();
   const engineLabel = engineSelect.options[engineSelect.selectedIndex].text;
-  await resetDatabase(`Switched to ${engineLabel}. The database is empty; run your scripts to rebuild it.`);
+  runExclusively(() => resetDatabase(`Switched to ${engineLabel}. The database is empty; run your scripts to rebuild it.`));
 });
 
 runButton.addEventListener('click', runSelectionOrActiveTab);
@@ -219,7 +235,7 @@ runAllButton.addEventListener('click', runAllTabs);
 resetDatabaseButton.addEventListener('click', () => {
   if (isBusy) return;
   if (!window.confirm('Reset the database? All tables and data are dropped. Your tabs are kept.')) return;
-  resetDatabase('Database reset. It is empty now.');
+  runExclusively(() => resetDatabase('Database reset. It is empty now.'));
 });
 
 document.addEventListener('keydown', (event) => {
@@ -236,13 +252,13 @@ openButton.addEventListener('click', () => openInput.click());
 openInput.addEventListener('change', async () => {
   const selectedFiles = [...openInput.files];
   openInput.value = '';
-  if (selectedFiles.length > 0 && !isBusy) await openFiles(selectedFiles);
+  if (selectedFiles.length > 0) await runExclusively(() => openFiles(selectedFiles));
 });
 
 newSessionButton.addEventListener('click', () => {
   if (isBusy) return;
   if (!window.confirm('Start a new session? Your tabs are replaced by the example and the database is reset.')) return;
-  loadSession({ ...EXAMPLE_SESSION, engine: engineSelect.value }, { replay: false });
+  runExclusively(() => loadSession({ ...EXAMPLE_SESSION, engine: engineSelect.value }, { replay: false }));
 });
 
 themeButton.addEventListener('click', () => {

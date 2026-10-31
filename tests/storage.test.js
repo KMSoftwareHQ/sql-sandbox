@@ -27,6 +27,11 @@ describe('session storage', () => {
     });
   });
 
+  it('reports failure when the browser refuses to store the session', () => {
+    globalThis.localStorage.setItem = () => { throw new Error('QuotaExceededError'); };
+    expect(saveSession({ engine: 'sqlite', tabs: [], activeTabIndex: 0 })).toBe(false);
+  });
+
   it('clamps an out-of-range active tab and ignores corrupt data', () => {
     localStorage.setItem('sql-sandbox:session', JSON.stringify({ engine: 'sqlite', tabs: [{ name: 'a.sql', sql: '' }], activeTabIndex: 7 }));
     expect(loadSavedSession().activeTabIndex).toBe(0);

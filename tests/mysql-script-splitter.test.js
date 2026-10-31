@@ -46,6 +46,27 @@ describe('splitMysqlScript', () => {
     expect(sqlOnly(script)).toEqual(['CREATE PROCEDURE get_clients()\nBEGIN\n  SELECT * FROM clients;\nEND', 'CALL get_clients()']);
   });
 
+  it('keeps statements made of executable comments (mysqldump style)', () => {
+    expect(sqlOnly('/*!40101 SET NAMES utf8 */;\n/*M!100100 SET x = 1 */;\n/* plain */;')).toEqual([
+      '/*!40101 SET NAMES utf8 */',
+      '/*M!100100 SET x = 1 */',
+    ]);
+  });
+
+  it('recognizes DELIMITER with a trailing comment, mid-line, and with # delimiters', () => {
+    expect(sqlOnly('DELIMITER // -- switch\nSELECT 1//\nDELIMITER ;')).toEqual(['SELECT 1']);
+    expect(sqlOnly('SELECT 1; DELIMITER //\nSELECT 2//')).toEqual(['SELECT 1', 'SELECT 2']);
+    expect(sqlOnly('DELIMITER ##\nSELECT 1##\nSELECT 2##')).toEqual(['SELECT 1', 'SELECT 2']);
+  });
+
+  it('does not mistake a column named delimiter_x for the command', () => {
+    expect(sqlOnly('SELECT delimiter_x FROM t;')).toEqual(['SELECT delimiter_x FROM t']);
+  });
+
+  it('points line numbers at the first code line, skipping comments', () => {
+    expect(splitMysqlScript('SELECT 1;\n-- explain\n-- more\n\nSELEC oops;').map((statement) => statement.line)).toEqual([1, 5]);
+  });
+
   it('reports the line each statement starts on', () => {
     const lines = splitMysqlScript('SELECT 1;\n\n\nSELECT 2;\r\nSELECT\n3;').map((statement) => statement.line);
     expect(lines).toEqual([1, 4, 5]);

@@ -63,6 +63,7 @@ body {
 
 .app-name { margin: 0 8px 0 0; font-size: 18px; }
 .toolbar-spacer { flex: 1; }
+.autosave-warning { color: var(--color-error-text); font-size: 13px; }
 
 .button,
 select {
