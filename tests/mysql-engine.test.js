@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Lite4MariaDB } from 'lite4mariadb';
 import { createMysqlSession, toResultSet } from '../src/engines/mysql.js';
+import { OpenTransactionError } from '../src/engines/open-transaction-error.js';
 import { EXAMPLE_SESSION } from '../src/example.js';
 
 // Uses the real MariaDB WebAssembly engine directly (no worker) in Node.
@@ -137,5 +138,30 @@ describe('mysql snapshots', () => {
     const restoredEmptySession = await createSession(emptySnapshot);
     expect((await restoredEmptySession.listSchema()).map((schema) => schema.name)).toEqual(['sandbox']);
     await restoredEmptySession.close();
+  }, 60000);
+});
+
+describe('mysql change marker, transactions and settings', () => {
+  it('changes the marker on writes and DDL, not on reads', async () => {
+    const session = await createSession();
+    await session.execute('CREATE TABLE t (x INT, g INT); INSERT INTO t VALUES (1, 1);');
+    const marker = await session.getChangeMarker();
+    await session.execute('SELECT g, COUNT(*) FROM t GROUP BY g; SHOW TABLES;');
+    expect(await session.getChangeMarker()).toBe(marker);
+    await session.execute('CREATE DATABASE other;');
+    expect(await session.getChangeMarker()).not.toBe(marker);
+    await session.close();
+  }, 60000);
+
+  it('throws OpenTransactionError inside a transaction and keeps session settings', async () => {
+    const session = await createSession();
+    await session.execute('CREATE TABLE t (x INT); START TRANSACTION; INSERT INTO t VALUES (1);');
+    await expect(session.exportSnapshot()).rejects.toBeInstanceOf(OpenTransactionError);
+    await session.execute("COMMIT; SET SESSION sql_mode = 'ANSI_QUOTES'; SET foreign_key_checks = 0;");
+    const restoredSession = await createSession(await session.exportSnapshot());
+    const outcome = await restoredSession.execute('SELECT @@SESSION.sql_mode AS sql_mode, @@SESSION.foreign_key_checks AS checks;');
+    expect(outcome.resultSets[0].rows).toEqual([['ANSI_QUOTES', 0]]);
+    await session.close();
+    await restoredSession.close();
   }, 60000);
 });

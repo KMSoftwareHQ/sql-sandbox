@@ -1,5 +1,6 @@
 import { groupColumnsBySchema } from './schema-listing.js';
 import { splitMysqlScript } from './mysql-script-splitter.js';
+import { OpenTransactionError } from './open-transaction-error.js';
 
 // MySQL support is provided by MariaDB compiled to WebAssembly (lite4mariadb, GPL-2.0).
 // The engine object only needs async exec(sql) and close(); see createMysqlSession below.
@@ -70,6 +71,13 @@ const SESSION_SETUP_STATEMENTS = [
   'DROP TABLE sandbox_snapshot_warmup',
 ];
 
+const CHANGE_MARKER_SQL = `
+SELECT VARIABLE_NAME AS name, VARIABLE_VALUE AS value
+FROM information_schema.GLOBAL_STATUS
+WHERE VARIABLE_NAME IN ('INNODB_LSN_CURRENT', 'HANDLER_WRITE', 'HANDLER_UPDATE', 'HANDLER_DELETE')
+   OR VARIABLE_NAME REGEXP '^COM_(CREATE|DROP|ALTER|RENAME|TRUNCATE)'
+ORDER BY VARIABLE_NAME`;
+
 function quoteIdentifier(identifier) {
   return `\`${identifier.replaceAll('`', '``')}\``;
 }
@@ -85,6 +93,13 @@ export async function createMysqlSession({ createDatabase, snapshot }) {
       if (!snapshot.hasTestDatabase) await database.exec('DROP DATABASE IF EXISTS test');
       // The data directory does not record the selected database, so select it again.
       if (snapshot.currentDatabase) await database.exec(`USE ${quoteIdentifier(snapshot.currentDatabase)}`);
+      // Session settings start at their defaults on a new connection; keep the user's.
+      if (snapshot.sessionSettings) {
+        await database.exec('SET SESSION sql_mode = ?, foreign_key_checks = ?', [
+          snapshot.sessionSettings.sqlMode,
+          snapshot.sessionSettings.foreignKeyChecks,
+        ]);
+      }
     } catch (restoreError) {
       await database.close().catch(() => {});
       throw restoreError;
@@ -127,11 +142,26 @@ function buildSessionApi(database) {
       );
     },
 
+    // Write counters and the InnoDB log position move on every write and DDL (any storage engine),
+    // and not on reads.
+    async getChangeMarker() {
+      return JSON.stringify((await database.exec(CHANGE_MARKER_SQL)).rows);
+    },
+
     async exportSnapshot() {
-      const [{ currentDatabase, hasTestDatabase }] = (await database.exec(
-        "SELECT DATABASE() AS currentDatabase, EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'test') AS hasTestDatabase",
-      )).rows;
-      return { bytes: await database.dumpDataDir(), currentDatabase, hasTestDatabase: Boolean(hasTestDatabase) };
+      const [state] = (await database.exec(`
+        SELECT DATABASE() AS currentDatabase,
+               EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'test') AS hasTestDatabase,
+               @@in_transaction AS inTransaction,
+               @@SESSION.sql_mode AS sqlMode,
+               @@SESSION.foreign_key_checks AS foreignKeyChecks`)).rows;
+      if (Number(state.inTransaction) === 1) throw new OpenTransactionError();
+      return {
+        bytes: await database.dumpDataDir(),
+        currentDatabase: state.currentDatabase,
+        hasTestDatabase: Boolean(Number(state.hasTestDatabase)),
+        sessionSettings: { sqlMode: state.sqlMode, foreignKeyChecks: Number(state.foreignKeyChecks) },
+      };
     },
 
     async close() {

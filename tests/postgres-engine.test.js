@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { OpenTransactionError } from '../src/engines/open-transaction-error.js';
 import { createPostgresSession } from '../src/engines/postgres.js';
 
 describe('postgres engine session', () => {
@@ -51,5 +52,29 @@ describe('postgres snapshots', () => {
     const restoredSession = await createPostgresSession({ snapshot });
     expect((await restoredSession.execute('SELECT body FROM notes;')).resultSets[0].rows).toEqual([['kept']]);
     await restoredSession.close();
+  }, 60000);
+});
+
+describe('postgres change marker and transactions', () => {
+  it('changes the marker on writes, not on reads', async () => {
+    const session = await createPostgresSession();
+    await session.execute('CREATE TABLE t (x INT);');
+    const marker = await session.getChangeMarker();
+    await session.execute('SELECT * FROM t;');
+    expect(await session.getChangeMarker()).toBe(marker);
+    await session.execute('INSERT INTO t VALUES (1);');
+    expect(await session.getChangeMarker()).not.toBe(marker);
+    await session.close();
+  }, 30000);
+
+  it('throws OpenTransactionError inside an open or aborted write transaction', async () => {
+    const session = await createPostgresSession();
+    await session.execute('CREATE TABLE t (x INT); BEGIN; INSERT INTO t VALUES (1);');
+    await expect(session.exportSnapshot()).rejects.toBeInstanceOf(OpenTransactionError);
+    await session.execute('SELECT * FROM missing_table;');
+    await expect(session.exportSnapshot()).rejects.toBeInstanceOf(OpenTransactionError);
+    await session.execute('ROLLBACK;');
+    await expect(session.exportSnapshot()).resolves.toHaveProperty('bytes');
+    await session.close();
   }, 60000);
 });

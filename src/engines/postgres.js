@@ -1,4 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
+import { OpenTransactionError } from './open-transaction-error.js';
 import { groupColumnsBySchema } from './schema-listing.js';
 
 const SYSTEM_SCHEMAS = ['pg_catalog', 'information_schema', 'pg_toast'];
@@ -44,7 +45,12 @@ ORDER BY tables.table_schema, tables.table_name, columns.ordinal_position`;
 // snapshot: optional result of exportSnapshot() from an earlier session, to start from.
 export async function createPostgresSession({ snapshot } = {}) {
   const database = new PGlite(snapshot ? { loadDataDir: new Blob([snapshot.bytes]) } : {});
-  await database.waitReady;
+  try {
+    await database.waitReady;
+  } catch (startError) {
+    await database.close().catch(() => {});
+    throw startError;
+  }
 
   return {
     async execute(sqlText) {
@@ -66,8 +72,18 @@ export async function createPostgresSession({ snapshot } = {}) {
       return groupColumnsBySchema(rows);
     },
 
-    // A copy of the data directory. Uncommitted changes are not visible after restoring it.
+    // The write-ahead log position moves on every write (including DDL and nextval) and not on reads.
+    async getChangeMarker() {
+      return (await database.query('SELECT pg_current_wal_insert_lsn()::text AS position')).rows[0].position;
+    },
+
+    // A copy of the data directory.
     async exportSnapshot() {
+      // Runs inside the user's transaction if one is open. An aborted transaction rejects every query.
+      const hasOpenWriteTransaction = await database
+        .query('SELECT pg_current_xact_id_if_assigned() IS NOT NULL AS "isOpen"')
+        .then((result) => result.rows[0].isOpen, () => true);
+      if (hasOpenWriteTransaction) throw new OpenTransactionError();
       const dataDirectoryArchive = await database.dumpDataDir();
       return { bytes: new Uint8Array(await dataDirectoryArchive.arrayBuffer()) };
     },

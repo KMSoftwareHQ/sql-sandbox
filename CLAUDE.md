@@ -55,7 +55,11 @@ Workbench-style: one live in-memory database per page, shared by all tabs, kept 
 Reset database, an engine switch, or opening a session file (which replays every tab).
 After every run, a snapshot of the database (each engine's `exportSnapshot()`) is saved to
 IndexedDB (`src/database-snapshot-store.js`), and a reload restores it without running any SQL.
-Reset, an engine switch and New session delete it. A snapshot that fails to restore is discarded.
+- Runs that change nothing (per the engine's `getChangeMarker()`) are not saved again.
+- An open write transaction is never saved (`OpenTransactionError`); the user is told to finish it.
+- Reset, an engine switch and New session delete the snapshot.
+- A snapshot that fails to restore is discarded; a failed engine download keeps it. After two
+  restores in a row that never finished, it is discarded so the page can load.
 
 ## Versioning and branches
 

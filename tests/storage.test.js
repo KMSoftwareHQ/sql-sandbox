@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { loadSavedSession, removeRetiredKeys, saveSession } from '../src/storage.js';
+import { finishRestoreAttempt, loadSavedSession, removeRetiredKeys, saveSession, startRestoreAttempt } from '../src/storage.js';
 
 function installMemoryLocalStorage() {
   const storedValues = new Map();
@@ -52,5 +52,17 @@ describe('retired keys', () => {
     expect(localStorage.getItem('sql-sandbox:database-built')).toBeNull();
     expect(localStorage.getItem('sql-sandbox:run-in-progress')).toBeNull();
     expect(loadSavedSession().tabs).toEqual([{ name: 'a.sql', sql: 'A;' }]);
+  });
+});
+
+describe('restore attempts', () => {
+  beforeEach(installMemoryLocalStorage);
+
+  it('counts restores that never finished and resets when one finishes', () => {
+    expect(startRestoreAttempt()).toBe(0);
+    expect(startRestoreAttempt()).toBe(1);
+    expect(startRestoreAttempt()).toBe(2);
+    finishRestoreAttempt();
+    expect(startRestoreAttempt()).toBe(0);
   });
 });

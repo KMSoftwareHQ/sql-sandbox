@@ -1,4 +1,5 @@
 import initSqlJs from 'sql.js';
+import { OpenTransactionError } from './open-transaction-error.js';
 
 let sqlJsPromise = null;
 
@@ -47,6 +48,8 @@ export async function createSqliteSession({ wasmLocation, snapshot } = {}) {
     // sql.js opens any bytes without complaint and fails on the first query; check the file now.
     try {
       database.exec('SELECT count(*) FROM sqlite_master');
+      // A new connection starts with foreign keys off; keep the user's setting.
+      if (snapshot.foreignKeys) database.exec('PRAGMA foreign_keys = ON');
     } catch (openError) {
       database.close();
       throw openError;
@@ -85,9 +88,22 @@ export async function createSqliteSession({ wasmLocation, snapshot } = {}) {
       return [{ name: 'main', tables }];
     },
 
-    // Throws while a write transaction is open (BEGIN without COMMIT), so uncommitted work is never saved.
+    // Changes whenever data or schema change; reads leave it alone. Lets callers skip needless snapshots.
+    async getChangeMarker() {
+      return JSON.stringify(database.exec('SELECT total_changes(), (SELECT schema_version FROM pragma_schema_version)')[0].values);
+    },
+
     async exportSnapshot() {
-      return { bytes: database.export() };
+      let bytes;
+      try {
+        bytes = database.export();
+      } catch (exportError) {
+        // sql.js refuses while a write transaction is open.
+        if (/busy or locked|active write transactions/i.test(exportError.message)) throw new OpenTransactionError();
+        throw exportError;
+      }
+      const foreignKeys = database.exec('PRAGMA foreign_keys')[0].values[0][0] === 1;
+      return { bytes, foreignKeys };
     },
 
     async close() {

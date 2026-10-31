@@ -24,7 +24,18 @@ const ENGINE_LOADERS = {
       import('./mysql.js'),
       import(/* @vite-ignore */ workerModuleUrl),
     ]);
-    return (snapshot) => createMysqlSession({ createDatabase: (options) => Lite4MariaDBWorker.create(options), snapshot });
+    const workerEntryUrl = new URL('./vendor/lite4mariadb/worker-entry.mjs', document.baseURI);
+    // Our own Worker, so it can be terminated if opening the database fails (lite4mariadb leaves it running).
+    const createDatabase = async (options) => {
+      const worker = new Worker(workerEntryUrl, { type: 'module' });
+      try {
+        return await Lite4MariaDBWorker.create(options, worker);
+      } catch (createError) {
+        worker.terminate();
+        throw createError;
+      }
+    };
+    return (snapshot) => createMysqlSession({ createDatabase, snapshot });
   },
 };
 
@@ -39,6 +50,11 @@ function loadSessionFactory(engineName) {
   return loadedSessionFactories.get(engineName);
 }
 
+// Loads the engine's code without creating a database, e.g. to tell a failed download apart from a bad snapshot.
+export async function loadEngine(engineName) {
+  await loadSessionFactory(normalizeEngineName(engineName));
+}
+
 export function isEngineLoaded(engineName) {
   return loadedSessionFactories.has(normalizeEngineName(engineName));
 }
@@ -49,7 +65,9 @@ export function isEngineLoaded(engineName) {
 //     resultSets items: { kind: 'rows', columns, rows } | { kind: 'status', message }
 //     error: null | { message }
 //   listSchema() -> [{ name, tables: [{ name, columns: [{ name, type, isPrimaryKey }] }] }]
-//   exportSnapshot() -> { bytes: Uint8Array, ... }: a copy of the database to pass back as `snapshot`
+//   getChangeMarker() -> string that changes whenever data or schema change (reads leave it alone)
+//   exportSnapshot() -> { bytes: Uint8Array, ... }: a copy of the database to pass back as `snapshot`;
+//     throws OpenTransactionError while a write transaction is open
 //   close()
 // snapshot: optional exportSnapshot() result from the same engine, to restore instead of starting empty.
 export async function createEngineSession(engineName, { snapshot } = {}) {
