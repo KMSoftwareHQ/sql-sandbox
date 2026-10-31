@@ -60,14 +60,43 @@ export function explainEngineLimitation(errorMessage) {
 
 // Runs once per new database: MariaDB ships an empty `test` database that MySQL does not have,
 // and without a selected database a plain CREATE TABLE fails. Scripts can still CREATE/USE their own.
-const SESSION_SETUP_STATEMENTS = ['DROP DATABASE IF EXISTS test', 'CREATE DATABASE sandbox', 'USE sandbox'];
+// The InnoDB table created and dropped at the end makes InnoDB write its system files; a snapshot
+// (dumpDataDir) taken before InnoDB has written anything cannot be opened again.
+const SESSION_SETUP_STATEMENTS = [
+  'DROP DATABASE IF EXISTS test',
+  'CREATE DATABASE sandbox',
+  'USE sandbox',
+  'CREATE TABLE sandbox_snapshot_warmup (id INT) ENGINE=InnoDB',
+  'DROP TABLE sandbox_snapshot_warmup',
+];
+
+function quoteIdentifier(identifier) {
+  return `\`${identifier.replaceAll('`', '``')}\``;
+}
 
 // A persistent MariaDB database: state carries over between execute() calls until close().
-// createDatabase(): resolves to a lite4mariadb instance (in the browser, a worker-backed one).
-export async function createMysqlSession({ createDatabase }) {
-  const database = await createDatabase();
+// createDatabase(options): resolves to a lite4mariadb instance (in the browser, a worker-backed one).
+// snapshot: optional result of exportSnapshot() from an earlier session, to start from.
+export async function createMysqlSession({ createDatabase, snapshot }) {
+  if (snapshot) {
+    const database = await createDatabase({ loadDataDir: snapshot.bytes });
+    try {
+      // Opening a data directory recreates the `test` database; drop it unless the user had one.
+      if (!snapshot.hasTestDatabase) await database.exec('DROP DATABASE IF EXISTS test');
+      // The data directory does not record the selected database, so select it again.
+      if (snapshot.currentDatabase) await database.exec(`USE ${quoteIdentifier(snapshot.currentDatabase)}`);
+    } catch (restoreError) {
+      await database.close().catch(() => {});
+      throw restoreError;
+    }
+    return buildSessionApi(database);
+  }
+  const database = await createDatabase({});
   for (const setupStatement of SESSION_SETUP_STATEMENTS) await database.exec(setupStatement);
+  return buildSessionApi(database);
+}
 
+function buildSessionApi(database) {
   return {
     async execute(sqlText) {
       const startTime = performance.now();
@@ -96,6 +125,13 @@ export async function createMysqlSession({ createDatabase }) {
       return databaseRows.rows.map(
         ({ schemaName }) => schemasWithTables.find((schema) => schema.name === schemaName) ?? { name: schemaName, tables: [] },
       );
+    },
+
+    async exportSnapshot() {
+      const [{ currentDatabase, hasTestDatabase }] = (await database.exec(
+        "SELECT DATABASE() AS currentDatabase, EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'test') AS hasTestDatabase",
+      )).rows;
+      return { bytes: await database.dumpDataDir(), currentDatabase, hasTestDatabase: Boolean(hasTestDatabase) };
     },
 
     async close() {

@@ -39,3 +39,17 @@ describe('postgres engine session', () => {
     await session.close();
   }, 30000);
 });
+
+describe('postgres snapshots', () => {
+  it('restores tables and rows into a new session', async () => {
+    const session = await createPostgresSession();
+    await session.execute("CREATE TABLE notes (body TEXT); INSERT INTO notes VALUES ('kept');");
+    const snapshot = await session.exportSnapshot();
+    expect(snapshot.bytes).toBeInstanceOf(Uint8Array);
+    await session.close();
+
+    const restoredSession = await createPostgresSession({ snapshot });
+    expect((await restoredSession.execute('SELECT body FROM notes;')).resultSets[0].rows).toEqual([['kept']]);
+    await restoredSession.close();
+  }, 60000);
+});

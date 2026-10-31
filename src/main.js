@@ -5,16 +5,8 @@ import { EXAMPLE_SESSION } from './example.js';
 import { formatElapsedTime, renderLoading, renderNotice, renderResults } from './results-view.js';
 import { createSchemaBrowser } from './schema-browser.js';
 import { buildSessionFilename, normalizeEngineName, parseSession, serializeSession } from './session-file.js';
-import {
-  createDebouncedFunction,
-  loadSavedSession,
-  markRunFinished,
-  markRunStarted,
-  saveSession,
-  setDatabaseBuilt,
-  wasDatabaseBuilt,
-  wasLastRunInterrupted,
-} from './storage.js';
+import { clearDatabaseSnapshot, loadDatabaseSnapshot, saveDatabaseSnapshot } from './database-snapshot-store.js';
+import { createDebouncedFunction, loadSavedSession, removeRetiredKeys, saveSession } from './storage.js';
 import { createTabManager } from './tabs.js';
 import { applyTheme, oppositeTheme, persistTheme, resolveInitialTheme } from './theme.js';
 
@@ -30,14 +22,15 @@ const themeButton = document.getElementById('theme-button');
 const resultsContainer = document.getElementById('results');
 const elapsedTimeLabel = document.getElementById('elapsed-time');
 const autosaveWarning = document.getElementById('autosave-warning');
+const databaseSaveWarning = document.getElementById('database-save-warning');
 
 const EMPTY_DATABASE_MESSAGE = 'The database is empty. Run your scripts (Run all) to build it.';
 
 let currentTheme = resolveInitialTheme();
 applyTheme(currentTheme);
 
-const savedSession = loadSavedSession();
-const initialSession = savedSession ?? EXAMPLE_SESSION;
+removeRetiredKeys();
+const initialSession = loadSavedSession() ?? EXAMPLE_SESSION;
 engineSelect.value = normalizeEngineName(initialSession.engine);
 
 const autosave = createDebouncedFunction(saveCurrentSession, 400);
@@ -73,7 +66,7 @@ function buildSelectStatement(databaseName, tableName) {
 
 // --- Database session -------------------------------------------------------------------------
 // One live database per page. It persists between runs until Reset database, an engine change,
-// or loading a session file. It is never saved; a reload rebuilds it by running every tab again.
+// or loading a session file. After each run a snapshot is saved in IndexedDB; a reload restores it.
 
 let databaseSessionPromise = null;
 let isBusy = false;
@@ -140,23 +133,55 @@ async function executeScripts(scripts) {
   const runs = [];
   let totalElapsedMs = 0;
   // Marked only around the SQL itself, so a reload during an engine download is not mistaken for a stuck query.
-  markRunStarted();
-  setDatabaseBuilt(true);
-  try {
-    for (const script of scripts) {
-      const outcome = await databaseSession.execute(script.sql);
-      totalElapsedMs += outcome.elapsedMs;
-      // A lone script needs no heading unless it failed ("Error in query.sql").
-      const showTitle = scripts.length > 1 || outcome.error !== null;
-      runs.push({ title: showTitle ? script.title : '', ...outcome });
-      if (outcome.error) break;
-    }
-  } finally {
-    markRunFinished();
+  for (const script of scripts) {
+    const outcome = await databaseSession.execute(script.sql);
+    totalElapsedMs += outcome.elapsedMs;
+    // A lone script needs no heading unless it failed ("Error in query.sql").
+    const showTitle = scripts.length > 1 || outcome.error !== null;
+    runs.push({ title: showTitle ? script.title : '', ...outcome });
+    if (outcome.error) break;
   }
   renderResults(resultsContainer, runs);
-  elapsedTimeLabel.textContent = `Executed in ${formatElapsedTime(totalElapsedMs)}`;
+  const executedLabel = `Executed in ${formatElapsedTime(totalElapsedMs)}`;
+  elapsedTimeLabel.textContent = executedLabel;
   await refreshSchemaBrowser(databaseSession);
+  elapsedTimeLabel.textContent = `${executedLabel} · saving database…`;
+  await saveDatabase(databaseSession);
+  elapsedTimeLabel.textContent = executedLabel;
+}
+
+// Saves a snapshot of the live database so a reload restores it. Call only inside runExclusively,
+// so a snapshot is never taken in the middle of a run.
+async function saveDatabase(databaseSession) {
+  try {
+    await saveDatabaseSnapshot(engineSelect.value, await databaseSession.exportSnapshot());
+    databaseSaveWarning.hidden = true;
+  } catch (saveError) {
+    // SQLite refuses to snapshot an open write transaction; the previous snapshot is kept.
+    const transactionIsOpen = /busy or locked|active write transactions/i.test(saveError?.message ?? '');
+    databaseSaveWarning.textContent = transactionIsOpen
+      ? 'Database not saved: finish the open transaction (COMMIT or ROLLBACK) and run again to save it.'
+      : 'Database not saved (browser storage may be full). Your tabs are still saved.';
+    databaseSaveWarning.hidden = false;
+  }
+}
+
+// Restores the snapshot saved after the last run, if it belongs to the current engine.
+// Call only inside runExclusively.
+async function restoreSavedDatabase() {
+  const savedDatabase = await loadDatabaseSnapshot();
+  if (!savedDatabase || savedDatabase.engine !== engineSelect.value) return;
+  renderLoading(resultsContainer, 'Restoring your database…');
+  try {
+    databaseSessionPromise = createEngineSession(engineSelect.value, { snapshot: savedDatabase.snapshot });
+    // Reading the schema also proves the restored database is usable.
+    schemaBrowser.render(await (await databaseSessionPromise).listSchema());
+    renderNotice(resultsContainer, 'Database restored from your last visit.');
+  } catch (restoreError) {
+    await closeDatabaseSession();
+    await clearDatabaseSnapshot();
+    renderNotice(resultsContainer, `Your saved database could not be restored (${restoreError.message}), so it starts empty. Run your tabs to rebuild it.`);
+  }
 }
 
 function allTabScripts() {
@@ -179,7 +204,8 @@ function runAllTabs() {
 // Call only inside runExclusively.
 async function resetDatabase(noticeMessage) {
   await closeDatabaseSession();
-  setDatabaseBuilt(false);
+  await clearDatabaseSnapshot();
+  databaseSaveWarning.hidden = true;
   schemaBrowser.reset();
   schemaBrowser.showMessage(EMPTY_DATABASE_MESSAGE);
   elapsedTimeLabel.textContent = '';
@@ -292,13 +318,4 @@ window.addEventListener('pagehide', saveCurrentSession);
 
 updateThemeButtonLabel();
 
-// The database lives in memory, so a reload starts empty. If the user had built one, rebuild it by
-// running every tab again, unless the last run never finished: a query may freeze the page, so
-// the user decides when to run again.
-if (savedSession && wasDatabaseBuilt()) {
-  if (wasLastRunInterrupted()) {
-    renderNotice(resultsContainer, 'The database was not rebuilt automatically because the last run did not finish (the page was reloaded, closed or froze). If a query never ends, fix it, then press Run all.');
-  } else {
-    runExclusively(() => executeScripts(allTabScripts()));
-  }
-}
+runExclusively(restoreSavedDatabase);

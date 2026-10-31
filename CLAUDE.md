@@ -6,7 +6,7 @@
 inspired by db-fiddle.com. Everything runs in the browser:
 
 - No backend, no accounts, no telemetry.
-- Session state persists in `localStorage`.
+- Tabs persist in `localStorage`; a snapshot of the database persists in IndexedDB.
 - Users download their session as a `.sql` file and load it later to pick up where they left off.
 - Dark and light themes.
 - Engines run as WebAssembly: SQLite (`sql.js`), PostgreSQL (`@electric-sql/pglite`) and
@@ -53,9 +53,9 @@ must stay backward compatible.
 
 Workbench-style: one live in-memory database per page, shared by all tabs, kept until
 Reset database, an engine switch, or opening a session file (which replays every tab).
-The database itself is never persisted; only the tabs are. If the user had built a database, a
-reload rebuilds it by running every tab again (including tabs never run). If the previous run never
-finished (a query may freeze the page), the rebuild is skipped and the user is told to press Run all.
+After every run, a snapshot of the database (each engine's `exportSnapshot()`) is saved to
+IndexedDB (`src/database-snapshot-store.js`), and a reload restores it without running any SQL.
+Reset, an engine switch and New session delete it. A snapshot that fails to restore is discarded.
 
 ## Versioning and branches
 
@@ -114,5 +114,5 @@ This is a public repository.
 - Executing user-written SQL in the browser: runaway queries that freeze the tab, huge result
   sets that exhaust memory, and engine errors that must not crash the app.
 - Loading `.sql` session files: treat file contents as untrusted; never render them as HTML.
-- Session file format and `localStorage` schema changes: keep them backward compatible.
+- Session file format, `localStorage` and IndexedDB snapshot schema changes: keep them backward compatible.
 - Anything that would add network calls, a backend, or accounts (out of scope; ask first).

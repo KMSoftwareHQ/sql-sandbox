@@ -17,16 +17,17 @@ Everything runs in your browser as WebAssembly: no backend, no accounts, no tele
 - Schema sidebar listing databases, tables and columns (with primary keys); double-click a table
   to insert a `SELECT`.
 - Result tables per statement, "N rows affected" / "OK" for the rest, execution time, distinct `NULL`.
-- Autosave of your tabs to `localStorage`; dark and light themes (follows the system by default).
+- Your tabs and your database are saved in the browser and come back after a reload; dark and light
+  themes (follows the system by default).
 - Download every tab as one runnable `.sql` file and open it later to rebuild the database.
 
 ## How it works
 
 - The SQL engines are compiled to WebAssembly and run inside the browser tab. Your queries never
   reach a server; the server only hosts static files.
-- The database lives in memory for the session and keeps its state between runs. It is not saved:
-  after a reload, press Run all (or open your `.sql` file) to rebuild it. Results are inserted as
-  text, never as HTML.
+- The database runs in memory and keeps its state between runs. After each run a snapshot of it is
+  saved in the browser's IndexedDB, and a reload restores it. Reset database, switching engines and
+  New session delete the snapshot. Results are inserted as text, never as HTML.
 - Engines are lazy-loaded the first time you pick them, so the initial page stays small. The
   MySQL engine is served unmodified from `public/vendor/` (copied from `node_modules` by
   `scripts/copy-vendor-engines.mjs` before dev and build) and runs in a Web Worker.

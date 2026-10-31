@@ -4,7 +4,7 @@ import { createMysqlSession, toResultSet } from '../src/engines/mysql.js';
 import { EXAMPLE_SESSION } from '../src/example.js';
 
 // Uses the real MariaDB WebAssembly engine directly (no worker) in Node.
-const createSession = () => createMysqlSession({ createDatabase: () => Lite4MariaDB.create() });
+const createSession = (snapshot) => createMysqlSession({ createDatabase: (options) => Lite4MariaDB.create(options), snapshot });
 
 describe('mysql engine session', () => {
   it('runs a tutorial-style script with databases, USE and MySQL-specific syntax', async () => {
@@ -104,4 +104,38 @@ describe('toResultSet', () => {
     expect(toResultSet({ affected: 3, rows: [] })).toEqual({ kind: 'status', message: '3 rows affected' });
     expect(toResultSet({ affected: 0, rows: [] })).toEqual({ kind: 'status', message: 'OK' });
   });
+});
+
+describe('mysql snapshots', () => {
+  it('restores databases, rows and the selected database from a snapshot', async () => {
+    const session = await createSession();
+    await session.execute("CREATE DATABASE shop; USE shop; CREATE TABLE items (name VARCHAR(20)); INSERT INTO items VALUES ('kept');");
+    const snapshot = await session.exportSnapshot();
+    expect(snapshot.currentDatabase).toBe('shop');
+    await session.close();
+
+    const restoredSession = await createSession(snapshot);
+    const outcome = await restoredSession.execute('SELECT name FROM items;');
+    expect(outcome.error).toBeNull();
+    expect(outcome.resultSets[0].rows).toEqual([['kept']]);
+    expect((await restoredSession.listSchema()).map((schema) => schema.name)).toEqual(['sandbox', 'shop']);
+    await restoredSession.close();
+  }, 60000);
+
+  it('keeps a user-created test database and restores a session with no tables', async () => {
+    const session = await createSession();
+    await session.execute('CREATE DATABASE test;');
+    const snapshot = await session.exportSnapshot();
+    await session.close();
+    const restoredSession = await createSession(snapshot);
+    expect((await restoredSession.listSchema()).map((schema) => schema.name)).toEqual(['sandbox', 'test']);
+    await restoredSession.close();
+
+    const emptySession = await createSession();
+    const emptySnapshot = await emptySession.exportSnapshot();
+    await emptySession.close();
+    const restoredEmptySession = await createSession(emptySnapshot);
+    expect((await restoredEmptySession.listSchema()).map((schema) => schema.name)).toEqual(['sandbox']);
+    await restoredEmptySession.close();
+  }, 60000);
 });

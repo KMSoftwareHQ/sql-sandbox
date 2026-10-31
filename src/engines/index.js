@@ -7,11 +7,11 @@ const ENGINE_LOADERS = {
       import('./sqlite.js'),
       import('sql.js/dist/sql-wasm.wasm?url'),
     ]);
-    return () => createSqliteSession({ wasmLocation: wasmUrlModule.default });
+    return (snapshot) => createSqliteSession({ wasmLocation: wasmUrlModule.default, snapshot });
   },
   postgres: async () => {
     const { createPostgresSession } = await import('./postgres.js');
-    return createPostgresSession;
+    return (snapshot) => createPostgresSession({ snapshot });
   },
   mysql: async () => {
     if (!window.crossOriginIsolated) {
@@ -24,7 +24,7 @@ const ENGINE_LOADERS = {
       import('./mysql.js'),
       import(/* @vite-ignore */ workerModuleUrl),
     ]);
-    return () => createMysqlSession({ createDatabase: () => Lite4MariaDBWorker.create() });
+    return (snapshot) => createMysqlSession({ createDatabase: (options) => Lite4MariaDBWorker.create(options), snapshot });
   },
 };
 
@@ -49,10 +49,12 @@ export function isEngineLoaded(engineName) {
 //     resultSets items: { kind: 'rows', columns, rows } | { kind: 'status', message }
 //     error: null | { message }
 //   listSchema() -> [{ name, tables: [{ name, columns: [{ name, type, isPrimaryKey }] }] }]
+//   exportSnapshot() -> { bytes: Uint8Array, ... }: a copy of the database to pass back as `snapshot`
 //   close()
-export async function createEngineSession(engineName) {
+// snapshot: optional exportSnapshot() result from the same engine, to restore instead of starting empty.
+export async function createEngineSession(engineName, { snapshot } = {}) {
   const normalizedName = normalizeEngineName(engineName);
   const loader = ENGINE_LOADERS[normalizedName] ? normalizedName : 'sqlite';
   const createSession = await loadSessionFactory(loader);
-  return createSession();
+  return createSession(snapshot);
 }

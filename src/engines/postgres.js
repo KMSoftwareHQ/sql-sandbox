@@ -41,8 +41,9 @@ WHERE tables.table_schema <> ALL ($1)
 ORDER BY tables.table_schema, tables.table_name, columns.ordinal_position`;
 
 // A persistent PostgreSQL database: state carries over between execute() calls until close().
-export async function createPostgresSession() {
-  const database = new PGlite();
+// snapshot: optional result of exportSnapshot() from an earlier session, to start from.
+export async function createPostgresSession({ snapshot } = {}) {
+  const database = new PGlite(snapshot ? { loadDataDir: new Blob([snapshot.bytes]) } : {});
   await database.waitReady;
 
   return {
@@ -63,6 +64,12 @@ export async function createPostgresSession() {
     async listSchema() {
       const { rows } = await database.query(LIST_COLUMNS_SQL, [SYSTEM_SCHEMAS]);
       return groupColumnsBySchema(rows);
+    },
+
+    // A copy of the data directory. Uncommitted changes are not visible after restoring it.
+    async exportSnapshot() {
+      const dataDirectoryArchive = await database.dumpDataDir();
+      return { bytes: new Uint8Array(await dataDirectoryArchive.arrayBuffer()) };
     },
 
     async close() {

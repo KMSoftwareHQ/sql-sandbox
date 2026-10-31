@@ -39,9 +39,19 @@ function runScript(database, sqlText, collectedResultSets) {
 }
 
 // A persistent SQLite database: state carries over between execute() calls until close().
-export async function createSqliteSession({ wasmLocation } = {}) {
+// snapshot: optional result of exportSnapshot() from an earlier session, to start from.
+export async function createSqliteSession({ wasmLocation, snapshot } = {}) {
   const SQL = await loadSqlJs(wasmLocation);
-  const database = new SQL.Database();
+  const database = new SQL.Database(snapshot?.bytes);
+  if (snapshot) {
+    // sql.js opens any bytes without complaint and fails on the first query; check the file now.
+    try {
+      database.exec('SELECT count(*) FROM sqlite_master');
+    } catch (openError) {
+      database.close();
+      throw openError;
+    }
+  }
 
   return {
     async execute(sqlText) {
@@ -73,6 +83,11 @@ export async function createSqliteSession({ wasmLocation } = {}) {
         return { name: tableName, columns };
       });
       return [{ name: 'main', tables }];
+    },
+
+    // Throws while a write transaction is open (BEGIN without COMMIT), so uncommitted work is never saved.
+    async exportSnapshot() {
+      return { bytes: database.export() };
     },
 
     async close() {

@@ -77,3 +77,29 @@ describe('sqlite engine session', () => {
     await session.close();
   });
 });
+
+describe('sqlite snapshots', () => {
+  it('restores tables and rows into a new session', async () => {
+    const session = await createSqliteSession();
+    await session.execute("CREATE TABLE notes (body TEXT); INSERT INTO notes VALUES ('kept');");
+    const snapshot = await session.exportSnapshot();
+    await session.close();
+
+    const restoredSession = await createSqliteSession({ snapshot });
+    expect((await restoredSession.execute('SELECT body FROM notes;')).resultSets[0].rows).toEqual([['kept']]);
+    await restoredSession.close();
+  });
+
+  it('refuses to snapshot an unfinished transaction, so uncommitted rows are never saved', async () => {
+    const session = await createSqliteSession();
+    await session.execute('CREATE TABLE t (x INTEGER); BEGIN; INSERT INTO t VALUES (1);');
+    await expect(session.exportSnapshot()).rejects.toThrow();
+    await session.close();
+  });
+});
+
+describe('sqlite snapshot validation', () => {
+  it('rejects bytes that are not a SQLite database', async () => {
+    await expect(createSqliteSession({ snapshot: { bytes: new Uint8Array([1, 2, 3, 4]) } })).rejects.toThrow();
+  });
+});
