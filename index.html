@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SQL Fiddle</title>
+    <script>
+      // Apply the stored theme before first paint to avoid a flash.
+      (function () {
+        var storedTheme = null;
+        try { storedTheme = localStorage.getItem('db-fiddle:theme'); } catch (error) {}
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = storedTheme === 'dark' || storedTheme === 'light' ? storedTheme : (prefersDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
+  </head>
+  <body>
+    <header class="toolbar">
+      <h1 class="app-name">SQL Fiddle</h1>
+      <label class="toolbar-field">
+        <span class="visually-hidden">Engine</span>
+        <select id="engine-select" aria-label="Database engine">
+          <option value="sqlite">SQLite</option>
+          <option value="postgres">PostgreSQL</option>
+        </select>
+      </label>
+      <button id="run-button" class="button button-primary" type="button" title="Run (Ctrl/Cmd+Enter)">Run</button>
+      <span class="toolbar-spacer"></span>
+      <button id="download-button" class="button" type="button">Download .sql</button>
+      <button id="load-button" class="button" type="button">Load .sql</button>
+      <input id="load-input" type="file" accept=".sql,text/plain,application/sql" hidden />
+      <button id="reset-button" class="button" type="button">Reset</button>
+      <button id="theme-button" class="button" type="button" aria-label="Toggle dark and light theme">Theme</button>
+    </header>
+
+    <main class="workspace">
+      <section class="editors">
+        <div class="editor-pane">
+          <h2 class="pane-title">Schema SQL</h2>
+          <div id="schema-editor" class="editor-host"></div>
+        </div>
+        <div class="editor-pane">
+          <h2 class="pane-title">Query SQL</h2>
+          <div id="query-editor" class="editor-host"></div>
+        </div>
+      </section>
+
+      <section class="results-panel" aria-live="polite">
+        <h2 class="pane-title">Results <span id="elapsed-time" class="elapsed-time"></span></h2>
+        <div id="results" class="results"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
