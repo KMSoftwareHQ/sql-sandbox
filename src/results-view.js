@@ -26,6 +26,9 @@ function renderCell(value) {
   return createElementWithText('td', typeof value === 'number' ? 'cell-number' : '', formatCellValue(value));
 }
 
+// Rendering is capped so a huge result set cannot freeze the page.
+export const MAX_RENDERED_ROWS = 1000;
+
 function renderRowsTable(resultSet) {
   const wrapper = createElementWithText('div', 'result-block');
   const scrollContainer = createElementWithText('div', 'table-scroll');
@@ -40,7 +43,7 @@ function renderRowsTable(resultSet) {
   table.append(tableHead);
 
   const tableBody = document.createElement('tbody');
-  for (const rowValues of resultSet.rows) {
+  for (const rowValues of resultSet.rows.slice(0, MAX_RENDERED_ROWS)) {
     const row = document.createElement('tr');
     for (const value of rowValues) row.append(renderCell(value));
     tableBody.append(row);
@@ -50,7 +53,9 @@ function renderRowsTable(resultSet) {
   scrollContainer.append(table);
   wrapper.append(scrollContainer);
   const rowCount = resultSet.rows.length;
-  wrapper.append(createElementWithText('p', 'result-caption', `${rowCount} ${rowCount === 1 ? 'row' : 'rows'}`));
+  const rowCountText = `${rowCount} ${rowCount === 1 ? 'row' : 'rows'}`;
+  const captionText = rowCount > MAX_RENDERED_ROWS ? `${rowCountText} (showing the first ${MAX_RENDERED_ROWS})` : rowCountText;
+  wrapper.append(createElementWithText('p', 'result-caption', captionText));
   return wrapper;
 }
 
@@ -58,8 +63,9 @@ export function renderLoading(container, message) {
   container.replaceChildren(createElementWithText('p', 'loading-message', message));
 }
 
-export function renderResults(container, { resultSets, error }) {
+function renderRun({ title, resultSets, error }) {
   const children = [];
+  if (title) children.push(createElementWithText('h3', 'run-title', title));
 
   for (const resultSet of resultSets) {
     children.push(
@@ -70,17 +76,24 @@ export function renderResults(container, { resultSets, error }) {
   }
 
   if (error) {
-    const errorLabels = { schema: 'Error in schema', query: 'Error in query', engine: 'Engine error' };
     const errorBox = createElementWithText('div', 'error-box');
     errorBox.setAttribute('role', 'alert');
-    errorBox.append(createElementWithText('strong', 'error-title', errorLabels[error.phase] ?? 'Error'));
+    errorBox.append(createElementWithText('strong', 'error-title', title ? `Error in ${title}` : 'Error'));
     errorBox.append(createElementWithText('pre', 'error-message', error.message));
     children.push(errorBox);
   } else if (resultSets.length === 0) {
-    children.push(createElementWithText('p', 'status-message', 'No statements to run in the query editor.'));
+    children.push(createElementWithText('p', 'status-message', 'No statements to run.'));
   }
+  return children;
+}
 
-  container.replaceChildren(...children);
+// runs: [{ title?, resultSets, error }] — one entry per executed tab.
+export function renderResults(container, runs) {
+  container.replaceChildren(...runs.flatMap(renderRun));
+}
+
+export function renderNotice(container, message) {
+  container.replaceChildren(createElementWithText('p', 'status-message', message));
 }
 
 export function formatElapsedTime(elapsedMs) {
