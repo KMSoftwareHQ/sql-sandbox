@@ -6,6 +6,13 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-31
+
+### Added
+
+- Docker deployment: multi-stage build served by nginx on `127.0.0.1:8110`
+  (configurable via `SQL_SANDBOX_PORT`), ready to sit behind a reverse proxy.
+
 ## [0.2.0] - 2026-10-31
 
 ### Changed
