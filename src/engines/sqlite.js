@@ -1,4 +1,5 @@
 import initSqlJs from 'sql.js';
+import { OpenTransactionError } from './open-transaction-error.js';
 
 let sqlJsPromise = null;
 
@@ -39,9 +40,21 @@ function runScript(database, sqlText, collectedResultSets) {
 }
 
 // A persistent SQLite database: state carries over between execute() calls until close().
-export async function createSqliteSession({ wasmLocation } = {}) {
+// snapshot: optional result of exportSnapshot() from an earlier session, to start from.
+export async function createSqliteSession({ wasmLocation, snapshot } = {}) {
   const SQL = await loadSqlJs(wasmLocation);
-  const database = new SQL.Database();
+  const database = new SQL.Database(snapshot?.bytes);
+  if (snapshot) {
+    // sql.js opens any bytes without complaint and fails on the first query; check the file now.
+    try {
+      database.exec('SELECT count(*) FROM sqlite_master');
+      // A new connection starts with foreign keys off; keep the user's setting.
+      if (snapshot.foreignKeys) database.exec('PRAGMA foreign_keys = ON');
+    } catch (openError) {
+      database.close();
+      throw openError;
+    }
+  }
 
   return {
     async execute(sqlText) {
@@ -73,6 +86,28 @@ export async function createSqliteSession({ wasmLocation } = {}) {
         return { name: tableName, columns };
       });
       return [{ name: 'main', tables }];
+    },
+
+    // Changes whenever data, schema or a saved setting change; reads leave it alone. Lets callers skip needless snapshots.
+    async getChangeMarker() {
+      return JSON.stringify(database.exec(`
+        SELECT total_changes(),
+               (SELECT schema_version FROM pragma_schema_version),
+               (SELECT user_version FROM pragma_user_version),
+               (SELECT foreign_keys FROM pragma_foreign_keys)`)[0].values);
+    },
+
+    async exportSnapshot() {
+      let bytes;
+      try {
+        bytes = database.export();
+      } catch (exportError) {
+        // sql.js refuses while a write transaction is open.
+        if (/busy or locked|active write transactions/i.test(exportError.message)) throw new OpenTransactionError();
+        throw exportError;
+      }
+      const foreignKeys = database.exec('PRAGMA foreign_keys')[0].values[0][0] === 1;
+      return { bytes, foreignKeys };
     },
 
     async close() {

@@ -1,19 +1,20 @@
 import './styles.css';
 import { createSqlEditor } from './editors.js';
 import { createEngineSession, isEngineLoaded } from './engines/index.js';
+import { OpenTransactionError } from './engines/open-transaction-error.js';
 import { EXAMPLE_SESSION } from './example.js';
 import { formatElapsedTime, renderLoading, renderNotice, renderResults } from './results-view.js';
 import { createSchemaBrowser } from './schema-browser.js';
 import { buildSessionFilename, normalizeEngineName, parseSession, serializeSession } from './session-file.js';
+import { clearDatabaseSnapshot, loadDatabaseSnapshot, loadSnapshotOwner, saveDatabaseSnapshot } from './database-snapshot-store.js';
 import {
   createDebouncedFunction,
+  finishRestoreAttempt,
+  isSavedSessionKey,
   loadSavedSession,
-  markRunFinished,
-  markRunStarted,
+  removeRetiredKeys,
   saveSession,
-  setDatabaseBuilt,
-  wasDatabaseBuilt,
-  wasLastRunInterrupted,
+  startRestoreAttempt,
 } from './storage.js';
 import { createTabManager } from './tabs.js';
 import { applyTheme, oppositeTheme, persistTheme, resolveInitialTheme } from './theme.js';
@@ -30,12 +31,22 @@ const themeButton = document.getElementById('theme-button');
 const resultsContainer = document.getElementById('results');
 const elapsedTimeLabel = document.getElementById('elapsed-time');
 const autosaveWarning = document.getElementById('autosave-warning');
+const databaseSaveWarning = document.getElementById('database-save-warning');
+const otherTabWarning = document.getElementById('other-tab-warning');
 
 const EMPTY_DATABASE_MESSAGE = 'The database is empty. Run your scripts (Run all) to build it.';
+// After this many restores in a row that never finished, the next load skips restoring so the page stays usable.
+const MAX_UNFINISHED_RESTORES = 2;
+// Identifies this page among browser tabs that share the saved session and database.
+// crypto.randomUUID needs a secure context (HTTPS or localhost); self-hosting over plain HTTP must still work.
+const PAGE_ID = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+// Tells other tabs when this one saves or deletes the database. Local to the browser, no network.
+const tabChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('sql-sandbox') : null;
 
 let currentTheme = resolveInitialTheme();
 applyTheme(currentTheme);
 
+removeRetiredKeys();
 const savedSession = loadSavedSession();
 const initialSession = savedSession ?? EXAMPLE_SESSION;
 engineSelect.value = normalizeEngineName(initialSession.engine);
@@ -73,15 +84,26 @@ function buildSelectStatement(databaseName, tableName) {
 
 // --- Database session -------------------------------------------------------------------------
 // One live database per page. It persists between runs until Reset database, an engine change,
-// or loading a session file. It is never saved; a reload rebuilds it by running every tab again.
+// or loading a session file. After each run a snapshot is saved in IndexedDB; a reload restores it.
 
 let databaseSessionPromise = null;
 let isBusy = false;
+// The last successful save by this page: { changeMarker, savedAt }. A run that leaves the marker
+// unchanged is not saved again, as long as the stored snapshot is still this save.
+let lastSave = null;
+// A saved snapshot that is kept but not yet restored (the restore failed or was skipped). The next
+// run retries the restore instead of starting an empty database that would replace it on save.
+// Cleared by a successful restore or by resetDatabase (Reset, engine switch, New session, open file).
+let unrestoredSnapshot = null;
 
 function getDatabaseSession() {
   if (!databaseSessionPromise) {
-    databaseSessionPromise = createEngineSession(engineSelect.value);
-    databaseSessionPromise.catch(() => { databaseSessionPromise = null; });
+    const snapshotToRestore = unrestoredSnapshot;
+    databaseSessionPromise = createEngineSession(engineSelect.value, { snapshot: snapshotToRestore ?? undefined });
+    databaseSessionPromise.then(
+      () => { if (unrestoredSnapshot === snapshotToRestore) unrestoredSnapshot = null; },
+      () => { databaseSessionPromise = null; },
+    );
   }
   return databaseSessionPromise;
 }
@@ -133,30 +155,98 @@ async function executeScripts(scripts) {
   try {
     databaseSession = await getDatabaseSession();
   } catch (engineError) {
-    renderResults(resultsContainer, [{ title: '', resultSets: [], error: { message: `Could not load the database engine: ${engineError.message}` } }]);
+    const message = unrestoredSnapshot
+      ? `Your saved database still could not be restored (${engineError.message}). Nothing was run. Reload to try again, or press Reset database to discard it and start empty.`
+      : `Could not load the database engine: ${engineError.message}`;
+    renderResults(resultsContainer, [{ title: '', resultSets: [], error: { message } }]);
     return;
   }
 
   const runs = [];
   let totalElapsedMs = 0;
-  // Marked only around the SQL itself, so a reload during an engine download is not mistaken for a stuck query.
-  markRunStarted();
-  setDatabaseBuilt(true);
-  try {
-    for (const script of scripts) {
-      const outcome = await databaseSession.execute(script.sql);
-      totalElapsedMs += outcome.elapsedMs;
-      // A lone script needs no heading unless it failed ("Error in query.sql").
-      const showTitle = scripts.length > 1 || outcome.error !== null;
-      runs.push({ title: showTitle ? script.title : '', ...outcome });
-      if (outcome.error) break;
-    }
-  } finally {
-    markRunFinished();
+  for (const script of scripts) {
+    const outcome = await databaseSession.execute(script.sql);
+    totalElapsedMs += outcome.elapsedMs;
+    // A lone script needs no heading unless it failed ("Error in query.sql").
+    const showTitle = scripts.length > 1 || outcome.error !== null;
+    runs.push({ title: showTitle ? script.title : '', ...outcome });
+    if (outcome.error) break;
   }
   renderResults(resultsContainer, runs);
-  elapsedTimeLabel.textContent = `Executed in ${formatElapsedTime(totalElapsedMs)}`;
+  const executedLabel = `Executed in ${formatElapsedTime(totalElapsedMs)}`;
+  elapsedTimeLabel.textContent = executedLabel;
   await refreshSchemaBrowser(databaseSession);
+  elapsedTimeLabel.textContent = `${executedLabel} · saving database…`;
+  await saveDatabase(databaseSession);
+  elapsedTimeLabel.textContent = executedLabel;
+}
+
+// True when the stored snapshot is still this page's last save and the database has not changed since.
+async function isSavedSnapshotCurrent(databaseSession) {
+  if (!lastSave) return false;
+  // A failed marker read (e.g. inside an aborted transaction) means "unknown", so save.
+  const changeMarker = await databaseSession.getChangeMarker().catch(() => null);
+  if (changeMarker === null || changeMarker !== lastSave.changeMarker) return false;
+  const owner = await loadSnapshotOwner();
+  return owner?.pageId === PAGE_ID && owner.savedAt === lastSave.savedAt;
+}
+
+// Saves a snapshot of the live database so a reload restores it. Call only inside runExclusively,
+// so a snapshot is never taken in the middle of a run.
+async function saveDatabase(databaseSession) {
+  try {
+    if (await isSavedSnapshotCurrent(databaseSession)) return;
+    const snapshot = await databaseSession.exportSnapshot();
+    // Read after exporting, which itself moves some engine counters.
+    const changeMarker = await databaseSession.getChangeMarker().catch(() => null);
+    const owner = await saveDatabaseSnapshot(engineSelect.value, snapshot, PAGE_ID);
+    lastSave = { changeMarker, savedAt: owner.savedAt };
+    tabChannel?.postMessage('database-saved');
+    databaseSaveWarning.hidden = true;
+  } catch (saveError) {
+    // The previous snapshot is kept. Forget the last save so the next run tries again.
+    lastSave = null;
+    databaseSaveWarning.textContent = saveError instanceof OpenTransactionError
+      ? 'Database not saved: finish the open transaction (COMMIT or ROLLBACK) and run again to save it.'
+      : `Database not saved (${saveError?.message ?? 'unknown error'}). Your tabs are still saved.`;
+    databaseSaveWarning.hidden = false;
+  }
+}
+
+// Restores the snapshot saved after the last run. Call only inside runExclusively.
+// A snapshot is never deleted here because of a failure: it may be a network problem, so the user
+// decides (reload or run to retry, or Reset database to discard it).
+async function restoreSavedDatabase() {
+  const savedDatabase = await loadDatabaseSnapshot();
+  if (!savedDatabase) return;
+  // Without saved tabs (storage cleared) the page shows the example; don't pair it with an old
+  // database. A snapshot of another engine is left over from an interrupted engine switch.
+  if (!savedSession || savedDatabase.engine !== engineSelect.value) {
+    await clearDatabaseSnapshot();
+    return;
+  }
+  // A restore that crashes the page (e.g. out of memory) would otherwise repeat on every load.
+  if (startRestoreAttempt() >= MAX_UNFINISHED_RESTORES) {
+    finishRestoreAttempt();
+    unrestoredSnapshot = savedDatabase.snapshot;
+    renderNotice(resultsContainer, 'Your saved database was not restored automatically, because restoring it did not finish the last two times (the page was closed, or it ran out of memory). Running SQL tries again; press Reset database to discard it instead.');
+    return;
+  }
+  renderLoading(resultsContainer, 'Restoring your database…');
+  try {
+    databaseSessionPromise = createEngineSession(engineSelect.value, { snapshot: savedDatabase.snapshot });
+    const databaseSession = await databaseSessionPromise;
+    // Reading the schema also proves the restored database is usable.
+    schemaBrowser.render(await databaseSession.listSchema());
+    renderNotice(resultsContainer, 'Database restored from your last visit. Temporary tables and most session settings (SET, PRAGMA) are not kept.');
+    // lastSave stays null: the snapshot belongs to an earlier page, so the next run saves it as this page's.
+  } catch (restoreError) {
+    await closeDatabaseSession();
+    unrestoredSnapshot = savedDatabase.snapshot;
+    renderNotice(resultsContainer, `Your saved database could not be restored (${restoreError.message}). It is kept: reload or run SQL to try again, or press Reset database to discard it.`);
+  } finally {
+    finishRestoreAttempt();
+  }
 }
 
 function allTabScripts() {
@@ -179,7 +269,11 @@ function runAllTabs() {
 // Call only inside runExclusively.
 async function resetDatabase(noticeMessage) {
   await closeDatabaseSession();
-  setDatabaseBuilt(false);
+  await clearDatabaseSnapshot();
+  lastSave = null;
+  unrestoredSnapshot = null;
+  tabChannel?.postMessage('database-cleared');
+  databaseSaveWarning.hidden = true;
   schemaBrowser.reset();
   schemaBrowser.showMessage(EMPTY_DATABASE_MESSAGE);
   elapsedTimeLabel.textContent = '';
@@ -287,18 +381,15 @@ themeButton.addEventListener('click', () => {
   updateThemeButtonLabel();
 });
 
+// Another tab writing the session means both tabs share one saved session and database.
+window.addEventListener('storage', (event) => {
+  if (isSavedSessionKey(event.key)) otherTabWarning.hidden = false;
+});
+tabChannel?.addEventListener('message', () => { otherTabWarning.hidden = false; });
+
 // Persist the latest edits if the tab is closed before the debounced autosave fires.
 window.addEventListener('pagehide', saveCurrentSession);
 
 updateThemeButtonLabel();
 
-// The database lives in memory, so a reload starts empty. If the user had built one, rebuild it by
-// running every tab again, unless the last run never finished: a query may freeze the page, so
-// the user decides when to run again.
-if (savedSession && wasDatabaseBuilt()) {
-  if (wasLastRunInterrupted()) {
-    renderNotice(resultsContainer, 'The database was not rebuilt automatically because the last run did not finish (the page was reloaded, closed or froze). If a query never ends, fix it, then press Run all.');
-  } else {
-    runExclusively(() => executeScripts(allTabScripts()));
-  }
-}
+runExclusively(restoreSavedDatabase);

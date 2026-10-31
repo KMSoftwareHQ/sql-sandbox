@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { Lite4MariaDB } from 'lite4mariadb';
 import { createMysqlSession, toResultSet } from '../src/engines/mysql.js';
+import { OpenTransactionError } from '../src/engines/open-transaction-error.js';
 import { EXAMPLE_SESSION } from '../src/example.js';
 
 // Uses the real MariaDB WebAssembly engine directly (no worker) in Node.
-const createSession = () => createMysqlSession({ createDatabase: () => Lite4MariaDB.create() });
+const createSession = (snapshot) => createMysqlSession({ createDatabase: (options) => Lite4MariaDB.create(options), snapshot });
 
 describe('mysql engine session', () => {
   it('runs a tutorial-style script with databases, USE and MySQL-specific syntax', async () => {
@@ -104,4 +105,69 @@ describe('toResultSet', () => {
     expect(toResultSet({ affected: 3, rows: [] })).toEqual({ kind: 'status', message: '3 rows affected' });
     expect(toResultSet({ affected: 0, rows: [] })).toEqual({ kind: 'status', message: 'OK' });
   });
+});
+
+describe('mysql snapshots', () => {
+  it('restores databases, rows and the selected database from a snapshot', async () => {
+    const session = await createSession();
+    await session.execute("CREATE DATABASE shop; USE shop; CREATE TABLE items (name VARCHAR(20)); INSERT INTO items VALUES ('kept');");
+    const snapshot = await session.exportSnapshot();
+    expect(snapshot.currentDatabase).toBe('shop');
+    await session.close();
+
+    const restoredSession = await createSession(snapshot);
+    const outcome = await restoredSession.execute('SELECT name FROM items;');
+    expect(outcome.error).toBeNull();
+    expect(outcome.resultSets[0].rows).toEqual([['kept']]);
+    expect((await restoredSession.listSchema()).map((schema) => schema.name)).toEqual(['sandbox', 'shop']);
+    await restoredSession.close();
+  }, 60000);
+
+  it('keeps a user-created test database and restores a session with no tables', async () => {
+    const session = await createSession();
+    await session.execute('CREATE DATABASE test;');
+    const snapshot = await session.exportSnapshot();
+    await session.close();
+    const restoredSession = await createSession(snapshot);
+    expect((await restoredSession.listSchema()).map((schema) => schema.name)).toEqual(['sandbox', 'test']);
+    await restoredSession.close();
+
+    const emptySession = await createSession();
+    const emptySnapshot = await emptySession.exportSnapshot();
+    await emptySession.close();
+    const restoredEmptySession = await createSession(emptySnapshot);
+    expect((await restoredEmptySession.listSchema()).map((schema) => schema.name)).toEqual(['sandbox']);
+    await restoredEmptySession.close();
+  }, 60000);
+});
+
+describe('mysql change marker, transactions and settings', () => {
+  it('changes the marker on writes and DDL, not on reads', async () => {
+    const session = await createSession();
+    await session.execute('CREATE TABLE t (x INT, g INT); INSERT INTO t VALUES (1, 1);');
+    const marker = await session.getChangeMarker();
+    await session.execute('SELECT g, COUNT(*) FROM t GROUP BY g; SHOW TABLES;');
+    expect(await session.getChangeMarker()).toBe(marker);
+    await session.execute('CREATE DATABASE other;');
+    const afterCreate = await session.getChangeMarker();
+    expect(afterCreate).not.toBe(marker);
+    for (const settingStatement of ['USE other;', "SET sql_mode = 'ANSI_QUOTES';", 'SET foreign_key_checks = 0;']) {
+      const before = await session.getChangeMarker();
+      await session.execute(settingStatement);
+      expect(await session.getChangeMarker(), settingStatement).not.toBe(before);
+    }
+    await session.close();
+  }, 60000);
+
+  it('throws OpenTransactionError inside a transaction and keeps session settings', async () => {
+    const session = await createSession();
+    await session.execute('CREATE TABLE t (x INT); START TRANSACTION; INSERT INTO t VALUES (1);');
+    await expect(session.exportSnapshot()).rejects.toBeInstanceOf(OpenTransactionError);
+    await session.execute("COMMIT; SET SESSION sql_mode = 'ANSI_QUOTES'; SET foreign_key_checks = 0;");
+    const restoredSession = await createSession(await session.exportSnapshot());
+    const outcome = await restoredSession.execute('SELECT @@SESSION.sql_mode AS sql_mode, @@SESSION.foreign_key_checks AS checks;');
+    expect(outcome.resultSets[0].rows).toEqual([['ANSI_QUOTES', 0]]);
+    await session.close();
+    await restoredSession.close();
+  }, 60000);
 });

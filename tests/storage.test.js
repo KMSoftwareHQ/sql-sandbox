@@ -1,13 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  loadSavedSession,
-  markRunFinished,
-  markRunStarted,
-  saveSession,
-  setDatabaseBuilt,
-  wasDatabaseBuilt,
-  wasLastRunInterrupted,
-} from '../src/storage.js';
+import { finishRestoreAttempt, loadSavedSession, removeRetiredKeys, saveSession, startRestoreAttempt } from '../src/storage.js';
 
 function installMemoryLocalStorage() {
   const storedValues = new Map();
@@ -49,22 +41,28 @@ describe('session storage', () => {
   });
 });
 
-describe('reload rebuild flags', () => {
+describe('retired keys', () => {
   beforeEach(installMemoryLocalStorage);
 
-  it('tracks whether the user has built a database', () => {
-    expect(wasDatabaseBuilt()).toBe(false);
-    setDatabaseBuilt(true);
-    expect(wasDatabaseBuilt()).toBe(true);
-    setDatabaseBuilt(false);
-    expect(wasDatabaseBuilt()).toBe(false);
+  it('removes the v0.4.1 replay keys and keeps the session', () => {
+    saveSession({ engine: 'sqlite', tabs: [{ name: 'a.sql', sql: 'A;' }], activeTabIndex: 0 });
+    localStorage.setItem('sql-sandbox:database-built', '1');
+    localStorage.setItem('sql-sandbox:run-in-progress', '1');
+    removeRetiredKeys();
+    expect(localStorage.getItem('sql-sandbox:database-built')).toBeNull();
+    expect(localStorage.getItem('sql-sandbox:run-in-progress')).toBeNull();
+    expect(loadSavedSession().tabs).toEqual([{ name: 'a.sql', sql: 'A;' }]);
   });
+});
 
-  it('reports an interrupted run only between start and finish', () => {
-    expect(wasLastRunInterrupted()).toBe(false);
-    markRunStarted();
-    expect(wasLastRunInterrupted()).toBe(true);
-    markRunFinished();
-    expect(wasLastRunInterrupted()).toBe(false);
+describe('restore attempts', () => {
+  beforeEach(installMemoryLocalStorage);
+
+  it('counts restores that never finished and resets when one finishes', () => {
+    expect(startRestoreAttempt()).toBe(0);
+    expect(startRestoreAttempt()).toBe(1);
+    expect(startRestoreAttempt()).toBe(2);
+    finishRestoreAttempt();
+    expect(startRestoreAttempt()).toBe(0);
   });
 });

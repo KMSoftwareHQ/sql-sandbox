@@ -6,6 +6,23 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-31
+
+### Changed
+
+- **Your database is saved in the browser and restored on reload**, on all three engines, without
+  re-running any SQL. A copy is saved to IndexedDB after each run that changed something. Reset
+  database, switching engines and New session delete it. This replaces the 0.4.1 rebuild, which
+  re-ran your tabs.
+- Unfinished transactions are never saved; a warning asks you to COMMIT or ROLLBACK.
+- SQLite `foreign_keys` and MySQL `sql_mode` / `FOREIGN_KEY_CHECKS` survive a reload. Temporary
+  tables and other session settings do not.
+- A warning appears when SQL Sandbox is open in another tab, since tabs share one saved session.
+
+### Known issues
+
+- PostgreSQL `UNLOGGED` tables come back empty after a reload.
+
 ## [0.4.1] - 2026-10-31
 
 ### Fixed
