@@ -50,7 +50,7 @@ Changes to this format must stay backward compatible.
 This is a public repository.
 
 - Never commit PII: no personal names, emails, usernames, local paths, tokens, or keys.
-  The repo-local git identity is a placeholder (`db-fiddle contributors`).
+  Commits use the maintainer's GitHub noreply address; never a personal email.
 - Before every commit, review `git diff --cached` for anything confidential.
 - Keep docs and code clear and concise.
 
