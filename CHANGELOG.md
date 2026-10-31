@@ -6,6 +6,18 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-31
+
+### Security
+
+- Security headers: Content Security Policy, `X-Content-Type-Options`, `Referrer-Policy`,
+  `Permissions-Policy`, `Cross-Origin-Opener-Policy`; framing disallowed.
+- nginx no longer reports its version.
+
+### Changed
+
+- README: live demo link, screenshot and "How it works" section.
+
 ## [0.3.0] - 2026-10-31
 
 ### Added
