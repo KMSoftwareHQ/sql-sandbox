@@ -37,14 +37,21 @@ A downloaded session is valid, runnable SQL. Metadata lives in marker comments:
 
 ```sql
 -- @fiddle engine=sqlite
--- @fiddle section=schema
+-- @fiddle file=schema.sql
 CREATE TABLE ...;
--- @fiddle section=query
+-- @fiddle file=queries.sql
 SELECT ...;
 ```
 
-A plain `.sql` file without markers is loaded entirely into the schema editor.
-Changes to this format must stay backward compatible.
+Each `file=` marker starts a tab. A plain `.sql` file without markers opens as a new tab.
+v0.1–v0.3 files (`section=schema` / `section=query`) must keep loading. Changes to this format
+must stay backward compatible.
+
+## Run model
+
+Workbench-style: one live in-memory database per page, shared by all tabs, kept until
+Reset database, an engine switch, or opening a session file (which replays every tab).
+The database itself is never persisted; only the tabs are.
 
 ## Versioning and branches
 

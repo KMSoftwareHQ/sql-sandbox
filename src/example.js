@@ -1,7 +1,5 @@
-// Generic, fictional sample data that runs on both SQLite and PostgreSQL.
-export const EXAMPLE_SESSION = {
-  engine: 'sqlite',
-  schemaSql: `CREATE TABLE students (
+// Generic, fictional sample data that runs on SQLite, PostgreSQL and MySQL/MariaDB.
+const EXAMPLE_SCHEMA_SQL = `CREATE TABLE students (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   year INTEGER
@@ -33,10 +31,19 @@ INSERT INTO enrollments (student_id, course_id, grade) VALUES
   (1, 1, 90),
   (1, 2, 85),
   (2, 1, 72),
-  (2, 3, NULL);`,
-  querySql: `SELECT students.name, courses.title, enrollments.grade
+  (2, 3, NULL);`;
+
+const EXAMPLE_QUERY_SQL = `SELECT students.name, courses.title, enrollments.grade
 FROM enrollments
 JOIN students ON students.id = enrollments.student_id
 JOIN courses ON courses.id = enrollments.course_id
-ORDER BY students.name, courses.title;`,
+ORDER BY students.name, courses.title;`;
+
+export const EXAMPLE_SESSION = {
+  engine: 'sqlite',
+  tabs: [
+    { name: 'schema.sql', sql: EXAMPLE_SCHEMA_SQL },
+    { name: 'query.sql', sql: EXAMPLE_QUERY_SQL },
+  ],
+  activeTabIndex: 1,
 };
