@@ -14,6 +14,18 @@ export const KNOWN_ENGINES = ['sqlite', 'postgres', 'mysql'];
 export const DEFAULT_ENGINE = 'sqlite';
 
 const MARKER_PATTERN = /^\s*--\s*@fiddle\s+([A-Za-z]+)\s*=\s*(\S+)\s*$/i;
+
+// Tab SQL may itself contain lines that look like markers (e.g. a pasted session file). Those lines
+// are written with this prefix so they read back as text, not markers. Older versions see a comment.
+const LITERAL_LINE_PREFIX = '-- @fiddle-literal ';
+
+function escapeTabLine(line) {
+  return MARKER_PATTERN.test(line) || line.startsWith(LITERAL_LINE_PREFIX) ? LITERAL_LINE_PREFIX + line : line;
+}
+
+function unescapeTabLine(line) {
+  return line.startsWith(LITERAL_LINE_PREFIX) ? line.slice(LITERAL_LINE_PREFIX.length) : line;
+}
 const LEGACY_SECTION_TAB_NAMES = { schema: 'schema.sql', query: 'query.sql' };
 
 export function normalizeEngineName(engineName) {
@@ -31,7 +43,7 @@ export function serializeSession({ engine, tabs }) {
   const lines = [`-- @fiddle engine=${normalizeEngineName(engine)}`];
   tabs.forEach((tab, tabIndex) => {
     lines.push(`-- @fiddle file=${sanitizeTabName(tab.name, `script-${tabIndex + 1}.sql`)}`);
-    lines.push(tab.sql ?? '');
+    lines.push(String(tab.sql ?? '').split('\n').map(escapeTabLine).join('\n'));
   });
   lines.push('');
   return lines.join('\n');
@@ -76,7 +88,7 @@ export function parseSession(fileText, plainScriptName = 'script.sql') {
       currentTab = { name: plainScriptName, lines: [] };
       tabs.push(currentTab);
     }
-    currentTab.lines.push(line);
+    currentTab.lines.push(unescapeTabLine(line));
   }
 
   if (!hasMarkers) {
