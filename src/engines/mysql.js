@@ -143,9 +143,13 @@ function buildSessionApi(database) {
     },
 
     // Write counters and the InnoDB log position move on every write and DDL (any storage engine),
-    // and not on reads.
+    // and not on reads. The session state saved with a snapshot is included too.
     async getChangeMarker() {
-      return JSON.stringify((await database.exec(CHANGE_MARKER_SQL)).rows);
+      const [counters, sessionState] = await Promise.all([
+        database.exec(CHANGE_MARKER_SQL),
+        database.exec('SELECT DATABASE() AS currentDatabase, @@SESSION.sql_mode AS sqlMode, @@SESSION.foreign_key_checks AS foreignKeyChecks'),
+      ]);
+      return JSON.stringify([counters.rows, sessionState.rows]);
     },
 
     async exportSnapshot() {

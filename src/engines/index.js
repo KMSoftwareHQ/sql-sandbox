@@ -50,11 +50,6 @@ function loadSessionFactory(engineName) {
   return loadedSessionFactories.get(engineName);
 }
 
-// Loads the engine's code without creating a database, e.g. to tell a failed download apart from a bad snapshot.
-export async function loadEngine(engineName) {
-  await loadSessionFactory(normalizeEngineName(engineName));
-}
-
 export function isEngineLoaded(engineName) {
   return loadedSessionFactories.has(normalizeEngineName(engineName));
 }
@@ -74,5 +69,21 @@ export async function createEngineSession(engineName, { snapshot } = {}) {
   const normalizedName = normalizeEngineName(engineName);
   const loader = ENGINE_LOADERS[normalizedName] ? normalizedName : 'sqlite';
   const createSession = await loadSessionFactory(loader);
-  return createSession(snapshot);
+  return startWithTimeout(createSession(snapshot));
+}
+
+// Generous enough for a slow first download of the largest engine. PGlite never settles when its
+// wasm download fails while loading a data directory, which would lock the controls forever.
+const ENGINE_START_TIMEOUT_MS = 90_000;
+
+function startWithTimeout(sessionPromise) {
+  let timerId;
+  const timeout = new Promise((resolve, reject) => {
+    timerId = setTimeout(() => {
+      reject(new Error('The database engine did not start in time. Check your connection and reload the page.'));
+      // If it does start later, nobody is using it.
+      sessionPromise.then((lateSession) => lateSession.close()).catch(() => {});
+    }, ENGINE_START_TIMEOUT_MS);
+  });
+  return Promise.race([sessionPromise, timeout]).finally(() => clearTimeout(timerId));
 }

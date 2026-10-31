@@ -1,13 +1,16 @@
 // Saves a copy of the live database in IndexedDB so a reload restores it. localStorage is too small
 // (a PostgreSQL snapshot is several MB) and only stores text.
 //
-// One record: { formatVersion, engine, snapshot, savedAt }. snapshot is whatever the engine's
-// exportSnapshot() returned ({ bytes: Uint8Array, ... }). A record that cannot be restored
-// (e.g. after an engine upgrade) is discarded by the caller.
+// Two records, written together:
+// - 'current': { formatVersion, engine, snapshot, savedAt }. snapshot is whatever the engine's
+//   exportSnapshot() returned ({ bytes: Uint8Array, ... }).
+// - 'current-owner': { pageId, savedAt }, small, so a page can cheaply check that the stored
+//   snapshot is still the one it saved (another browser tab may have replaced or deleted it).
 
 const DATABASE_NAME = 'sql-sandbox';
 const STORE_NAME = 'database-snapshots';
 const RECORD_KEY = 'current';
+const OWNER_KEY = 'current-owner';
 const FORMAT_VERSION = 1;
 
 function openSnapshotDatabase() {
@@ -20,7 +23,7 @@ function openSnapshotDatabase() {
   });
 }
 
-// Runs one request in its own transaction and resolves when the transaction has committed.
+// Runs requests in one transaction and resolves with the last request's result once it has committed.
 async function runInStore(mode, makeRequest) {
   const snapshotDatabase = await openSnapshotDatabase();
   try {
@@ -36,9 +39,24 @@ async function runInStore(mode, makeRequest) {
   }
 }
 
-export function saveDatabaseSnapshot(engine, snapshot) {
-  const record = { formatVersion: FORMAT_VERSION, engine, snapshot, savedAt: Date.now() };
-  return runInStore('readwrite', (store) => store.put(record, RECORD_KEY));
+// Returns the saved owner record { pageId, savedAt }.
+export async function saveDatabaseSnapshot(engine, snapshot, pageId) {
+  const owner = { pageId, savedAt: Date.now() };
+  const record = { formatVersion: FORMAT_VERSION, engine, snapshot, savedAt: owner.savedAt };
+  await runInStore('readwrite', (store) => {
+    store.put(record, RECORD_KEY);
+    return store.put(owner, OWNER_KEY);
+  });
+  return owner;
+}
+
+// Returns { pageId, savedAt } of the stored snapshot, or null.
+export async function loadSnapshotOwner() {
+  try {
+    return (await runInStore('readonly', (store) => store.get(OWNER_KEY))) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // Returns { engine, snapshot } or null. Never throws: unreadable storage means nothing to restore.
@@ -56,7 +74,10 @@ export async function loadDatabaseSnapshot() {
 
 export async function clearDatabaseSnapshot() {
   try {
-    await runInStore('readwrite', (store) => store.delete(RECORD_KEY));
+    await runInStore('readwrite', (store) => {
+      store.delete(RECORD_KEY);
+      return store.delete(OWNER_KEY);
+    });
   } catch {
     // Nothing stored, or storage unavailable.
   }

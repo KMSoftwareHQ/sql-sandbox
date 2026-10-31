@@ -149,7 +149,13 @@ describe('mysql change marker, transactions and settings', () => {
     await session.execute('SELECT g, COUNT(*) FROM t GROUP BY g; SHOW TABLES;');
     expect(await session.getChangeMarker()).toBe(marker);
     await session.execute('CREATE DATABASE other;');
-    expect(await session.getChangeMarker()).not.toBe(marker);
+    const afterCreate = await session.getChangeMarker();
+    expect(afterCreate).not.toBe(marker);
+    for (const settingStatement of ['USE other;', "SET sql_mode = 'ANSI_QUOTES';", 'SET foreign_key_checks = 0;']) {
+      const before = await session.getChangeMarker();
+      await session.execute(settingStatement);
+      expect(await session.getChangeMarker(), settingStatement).not.toBe(before);
+    }
     await session.close();
   }, 60000);
 

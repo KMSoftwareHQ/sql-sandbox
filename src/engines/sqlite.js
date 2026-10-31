@@ -88,9 +88,13 @@ export async function createSqliteSession({ wasmLocation, snapshot } = {}) {
       return [{ name: 'main', tables }];
     },
 
-    // Changes whenever data or schema change; reads leave it alone. Lets callers skip needless snapshots.
+    // Changes whenever data, schema or a saved setting change; reads leave it alone. Lets callers skip needless snapshots.
     async getChangeMarker() {
-      return JSON.stringify(database.exec('SELECT total_changes(), (SELECT schema_version FROM pragma_schema_version)')[0].values);
+      return JSON.stringify(database.exec(`
+        SELECT total_changes(),
+               (SELECT schema_version FROM pragma_schema_version),
+               (SELECT user_version FROM pragma_user_version),
+               (SELECT foreign_keys FROM pragma_foreign_keys)`)[0].values);
     },
 
     async exportSnapshot() {

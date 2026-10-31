@@ -115,7 +115,13 @@ describe('sqlite change marker, transactions and settings', () => {
     await session.execute('SELECT * FROM t;');
     expect(await session.getChangeMarker()).toBe(afterCreate);
     await session.execute('INSERT INTO t VALUES (1);');
-    expect(await session.getChangeMarker()).not.toBe(afterCreate);
+    const afterInsert = await session.getChangeMarker();
+    expect(afterInsert).not.toBe(afterCreate);
+    await session.execute('PRAGMA foreign_keys = ON;');
+    const afterForeignKeys = await session.getChangeMarker();
+    expect(afterForeignKeys).not.toBe(afterInsert);
+    await session.execute('PRAGMA user_version = 7;');
+    expect(await session.getChangeMarker()).not.toBe(afterForeignKeys);
     await session.close();
   });
 
