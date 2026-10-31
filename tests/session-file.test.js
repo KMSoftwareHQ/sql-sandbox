@@ -53,6 +53,6 @@ describe('session file', () => {
   });
 
   it('builds a dated filename', () => {
-    expect(buildSessionFilename(new Date(2026, 0, 5))).toBe('fiddle-2026-01-05.sql');
+    expect(buildSessionFilename(new Date(2026, 0, 5))).toBe('sql-sandbox-2026-01-05.sql');
   });
 });

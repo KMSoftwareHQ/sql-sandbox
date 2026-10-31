@@ -113,7 +113,7 @@ loadInput.addEventListener('change', async () => {
 });
 
 resetButton.addEventListener('click', () => {
-  if (!window.confirm('Reset the fiddle? Your current schema and query will be replaced by the example.')) return;
+  if (!window.confirm('Reset the sandbox? Your current schema and query will be replaced by the example.')) return;
   applySession({ ...EXAMPLE_SESSION, engine: engineSelect.value });
   resultsContainer.replaceChildren();
   elapsedTimeLabel.textContent = '';

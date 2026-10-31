@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SQL Fiddle</title>
+    <title>SQL Sandbox</title>
     <script>
       // Apply the stored theme before first paint to avoid a flash.
       (function () {
         var storedTheme = null;
-        try { storedTheme = localStorage.getItem('db-fiddle:theme'); } catch (error) {}
+        try { storedTheme = localStorage.getItem('sql-sandbox:theme'); } catch (error) {}
         var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
         var theme = storedTheme === 'dark' || storedTheme === 'light' ? storedTheme : (prefersDark ? 'dark' : 'light');
         document.documentElement.setAttribute('data-theme', theme);
@@ -17,7 +17,7 @@
   </head>
   <body>
     <header class="toolbar">
-      <h1 class="app-name">SQL Fiddle</h1>
+      <h1 class="app-name">SQL Sandbox</h1>
       <label class="toolbar-field">
         <span class="visually-hidden">Engine</span>
         <select id="engine-select" aria-label="Database engine">

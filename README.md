@@ -1,4 +1,4 @@
-# SQL Fiddle (in-browser)
+# SQL Sandbox
 
 An open-source, account-free SQL playground for learning SQL, inspired by db-fiddle.com.
 Everything runs in your browser as WebAssembly: no backend, no accounts, no telemetry.
@@ -23,6 +23,12 @@ npm test         # unit tests (vitest)
 npm run build    # production build in dist/
 npm run preview  # serve the production build
 ```
+
+## Deploying
+
+`npm run build` outputs a static site in `dist/` with relative asset paths, so it can be served
+from any subpath (for example `https://example.com/sql-sandbox/`). Any static file host works;
+make sure `.wasm` files are served as `application/wasm`.
 
 ## Session file format
 

@@ -2,7 +2,7 @@
 
 ## Project
 
-**SQL Fiddle (in-browser)** — an open-source, account-free SQL playground for learning SQL,
+**SQL Sandbox** — an open-source, account-free SQL playground for learning SQL,
 inspired by db-fiddle.com. Everything runs in the browser:
 
 - No backend, no accounts, no telemetry.
