@@ -6,6 +6,14 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-31
+
+### Fixed
+
+- Reloading the page no longer leaves an empty database: if you had built one, every tab runs again
+  to rebuild it. If the previous run never finished (for example a query that froze the page), the
+  rebuild is skipped with a notice so the page cannot freeze again on load.
+
 ## [0.4.0] - 2026-10-31
 
 ### Added
